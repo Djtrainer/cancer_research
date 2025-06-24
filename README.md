@@ -50,18 +50,7 @@ The ultimate goal is to produce an interpretable model that uncovers a potential
 
 ## Setup & Installation
 
-The packages required to run the notebooks in the repository can be found in the `requirements.txt` file in the root directory.  The primary dependencies used across projects include:
-
-```bash
-pip install pandas numpy matplotlib lifelines scikit-learn scikit-survival statsmodels
-```
-
-To run a notebook, clone the repository and ensure you have the required libraries installed in your Python environment.
-
-```bash
-git clone [your-repo-url]
-cd [your-repo-name]
-```
+The packages required to run the notebooks in the repository can be found in the `requirements.txt` file in the root directory.
 
 ---
 
