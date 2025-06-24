@@ -8,7 +8,7 @@ This repository serves as a collection of data science projects exploring comple
 * [Projects](#projects)
     * [1. Prognostic Gene Signature in Breast Cancer](#project-1-prognostic-gene-signature-in-breast-cancer)
 * [Setup & Installation](#setup--installation)
-* [Contact](#contact)
+
 
 ---
 
@@ -53,10 +53,3 @@ The ultimate goal is to produce an interpretable model that uncovers a potential
 The packages required to run the notebooks in the repository can be found in the `requirements.txt` file in the root directory.
 
 ---
-
-## Contact
-
-For any questions or collaborations, please feel free to reach out.
-
-**Daniel Trainer**
-[LinkedIn](www.linkedin.com/in/daniel-trainer-800917181)
