@@ -84,6 +84,7 @@ tqdm=4.67.1=pypi_0
 traitlets=5.14.3=pyhd8ed1ab_1
 typing_extensions=4.14.0=pyhe01879c_0
 tzdata=2025.2=pypi_0
+umap-learn==0.5.7
 wcwidth=0.2.13=pyhd8ed1ab_1
 wheel=0.45.1=py311hca03da5_0
 wrapt=1.17.2=pypi_0
