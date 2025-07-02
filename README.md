@@ -9,6 +9,7 @@ This repository serves as a collection of data science projects exploring comple
     * [1. Exploratory Data Analysis (EDA) of Gene Expression Data](#exploratory-data-analysis-(eda)-of-gene-expression-data)
     * [2. Prognostic Gene Signature in Breast Cancer](#project-1-prognostic-gene-signature-in-breast-cancer)
     * [3. Graph Neural Network to Identify Tumor Cell Neighborhoods (Spatial Transcriptiomics)](#craph-neural-network-to-identify-tumor-cell-neighborhoods-(spatial-transcriptiomics))
+    * [4. Generative AI Model (VAE) to Predict Gene Expression from Drug SMILES](generative-ai-model-(vae)-to-predictgene-expression-from-drug-smiles)
 * [Setup & Installation](#setup--installation)
 
 
@@ -91,6 +92,20 @@ This repository is designed for data scientists, bioinformaticians, and research
 
   ![Spatial Transcriptomics Animation](imgs/spatial_transciptiomics/gcn_training_convergence.gif)
 
+---
+
+### 4. Generative AI Model (VAE) to Predict Gene Expression from Drug SMILES
+
+* **Notebook:** `notebooks/drug_induced_gene_expression_prediction.ipynb`
+
+* **Description:** ...
+
+* **Core Topics**:
+  * ...
+
+* **Key Findings:**
+
+  * ...
 ---
 
 ## Installation & Dependencies
