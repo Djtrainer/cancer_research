@@ -2,3 +2,4 @@ data/*
 models/*
 test.py
 imgs/spatial_transciptiomics/gcn_training_convergence.mp4
+notebooks/wandb/
