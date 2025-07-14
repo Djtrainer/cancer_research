@@ -13,7 +13,6 @@ This repository serves as a collection of data science projects exploring comple
 * [Setup & Installation](#setup--installation)
 
 
----
 
 ## About This Repository
 
@@ -21,56 +20,10 @@ The goal of this repository is to demonstrate the application of data science me
 
 This repository is designed for data scientists, bioinformaticians, and researchers interested in the intersection of data science and genomics. It provides a practical framework for understanding how to apply statistical methods and machine learning techniques to biological datasets, particularly in the context of cancer research.
 
----
 
 ## Projects
 
-### 1. Exploratory Data Analysis (EDA) of Gene Expression Data
-
-* **Notebook:** `notebooks/brca_gene_expression_eda.ipynb`
-
-* **Description:** The objective of this notebook is to perform a comprehensive exploratory data analysis on the TCGA-BRCA RNA-sequencing dataset and define which genes are candidates for predictive modeling based on differential expression in tumor tissue vs. normal tissue.
-
-* **Core Topics**:
-  * Differential Gene Expression Analysis
-  * Feature Selection Techniques (Variance Filtering)
-  * High Dimensional Analysis and Visualization (UMAP)
-
-* **Key Findings:**
-
-  * **Gene Expression Data Reflects Known Biology**: Housekeeping genes included mitochondrial and riboxomal genes, validating the biological plausibility of the data.
-
-  * **The Cancer Signal is a Dominant Source of Variation.**: A primary driver of variation in the dataset is the cancer phenotype itself, validated by UMAP plot of the high-variance genes between tumor samples and normal tissue samples.
-
-  * **Specific Genes are Massively Dysregulated in Tumors**: A differential expression analysis pinpointed 73 statistically significant genes that are either up- (potential oncogenes) or down-regulated (potential tumor supressors) in cancer cells.
-
----
-
-### 2. Prognostic Gene Signature in Breast Cancer
-
-* **Notebook:** `notebooks/brca_gene_expression_survival.ipynb`
-
-* **Description:** This project performs an end-to-end survival analysis on The Cancer Genome Atlas (TCGA) Breast Cancer (BRCA) cohort to identify a gene signature predictive of patient outcomes.
-
-* **Core Topics**:
-  * Survival Analysis (Kaplan-Meier, Cox Proportional-Hazards)
-  * High-Dimensional Data Analysis (p >> n problems)
-  * Differential Gene Expression Analysis
-  * Feature Selection Techniques (Variance Filtering)
-  * Machine Learning for Genomics (LASSO)
-  * Feature Engineering with Clinical and Genomic Data
-
-* **Key Findings:**
-
-  * **Multivariate Survival Modeling**: A Cox Proportional-Hazards model is built using clinical and biological variables (Age, Race, and ESR1 gene expression) to assess their individual impact on survival.
-
-  * **High-Dimensional Feature Selection**: To navigate the challenge of analyzing ~60,000 genes, feature selection is employed. This involves an initial unsupervised variance filter followed by a LASSO (L1) penalized Cox regression to select a sparse set of the most impactful genes.
-
-  * **Model Validation and Interpretation**: The final set of selected genes is validated in a standard Cox model to derive unbiased hazard ratios and p-values, and the well-known ESR1 gene's exclusion by the LASSO model is investigated.
-
----
-
-### 3. Graph Neural Network to Identify Tumor Cell Neighborhoods (Spatial Transcriptiomics)
+### 1. Graph Neural Network to Identify Tumor Cell Neighborhoods (Spatial Transcriptiomics)
 
 * **Notebook:** `notebooks/spatial_transcriptomics.ipynb`
 
@@ -92,20 +45,73 @@ This repository is designed for data scientists, bioinformaticians, and research
 
   ![Spatial Transcriptomics Animation](imgs/spatial_transciptiomics/gcn_training_convergence.gif)
 
----
+--- 
 
-### 4. Generative AI Model (VAE) to Predict Gene Expression from Drug SMILES
+###  2. Generative Modeling of Drug-Induced Gene Expression (Part I)
+* Notebook: notebooks/drug_induced_gene_expression_prediction.ipynb
 
-* **Notebook:** `notebooks/drug_induced_gene_expression_prediction.ipynb`
+* **Description**: This project develops a semi-supervised Conditional Variational Autoencoder (CVAE) to model the relationship between a drug's chemical structure and its effect on the human transcriptome. Using LINCS L1000 data, the model learns a compressed latent space that represents the biological state of cells. A classification head, trained on Mechanism of Action (MoA) labels, is used to regularize this space, with the ultimate goal of generating biologically feasible gene expression profiles for novel compounds from their chemical fingerprints alone.
 
-* **Description:** ...
+* **Core Topics:**
 
-* **Core Topics**:
-  * ...
+  * Generative Modeling with Variational Autoencoders (CVAEs)
+  * Semi-Supervised Learning
+  * Cheminformatics and Molecular Fingerprints
+  * Computational Biology and Transcriptomics
 
 * **Key Findings:**
 
-  * ...
+  * **Data Pipeline Established**: The LINCS L1000 gene expression data and corresponding chemical fingerprints have been successfully processed, normalized, and integrated into a custom PyTorch Dataset for model training.
+
+  * **Semi-Supervised CVAE Implemented**: A robust CVAE architecture has been implemented, featuring dedicated modules for encoding, decoding, and processing conditional information. The model is enhanced with a classification head to leverage Mechanism of Action (MoA) labels, guiding the model to learn a more biologically structured latent space.
+
+  * **Stable Training Achieved**: After iterative debugging of numerical instabilities, a stable training loop has been achieved. The model's loss curves demonstrate successful learning and convergence without significant overfitting or gradient explosion issues, providing a solid baseline for further analysis and optimization.
+
+---
+
+### 3. Exploratory Data Analysis (EDA) of Gene Expression Data
+
+* **Notebook:** `notebooks/brca_gene_expression_eda.ipynb`
+
+* **Description:** The objective of this notebook is to perform a comprehensive exploratory data analysis on the TCGA-BRCA RNA-sequencing dataset and define which genes are candidates for predictive modeling based on differential expression in tumor tissue vs. normal tissue.
+
+* **Core Topics**:
+  * Differential Gene Expression Analysis
+  * Feature Selection Techniques (Variance Filtering)
+  * High Dimensional Analysis and Visualization (UMAP)
+
+* **Key Findings:**
+
+  * **Gene Expression Data Reflects Known Biology**: Housekeeping genes included mitochondrial and riboxomal genes, validating the biological plausibility of the data.
+
+  * **The Cancer Signal is a Dominant Source of Variation.**: A primary driver of variation in the dataset is the cancer phenotype itself, validated by UMAP plot of the high-variance genes between tumor samples and normal tissue samples.
+
+  * **Specific Genes are Massively Dysregulated in Tumors**: A differential expression analysis pinpointed 73 statistically significant genes that are either up- (potential oncogenes) or down-regulated (potential tumor supressors) in cancer cells.
+
+---
+
+### 4. Prognostic Gene Signature in Breast Cancer
+
+* **Notebook:** `notebooks/brca_gene_expression_survival.ipynb`
+
+* **Description:** This project performs an end-to-end survival analysis on The Cancer Genome Atlas (TCGA) Breast Cancer (BRCA) cohort to identify a gene signature predictive of patient outcomes.
+
+* **Core Topics**:
+  * Survival Analysis (Kaplan-Meier, Cox Proportional-Hazards)
+  * High-Dimensional Data Analysis (p >> n problems)
+  * Differential Gene Expression Analysis
+  * Feature Selection Techniques (Variance Filtering)
+  * Machine Learning for Genomics (LASSO)
+  * Feature Engineering with Clinical and Genomic Data
+
+* **Key Findings:**
+
+  * **Multivariate Survival Modeling**: A Cox Proportional-Hazards model is built using clinical and biological variables (Age, Race, and ESR1 gene expression) to assess their individual impact on survival.
+
+  * **High-Dimensional Feature Selection**: To navigate the challenge of analyzing ~60,000 genes, feature selection is employed. This involves an initial unsupervised variance filter followed by a LASSO (L1) penalized Cox regression to select a sparse set of the most impactful genes.
+
+  * **Model Validation and Interpretation**: The final set of selected genes is validated in a standard Cox model to derive unbiased hazard ratios and p-values, and the well-known ESR1 gene's exclusion by the LASSO model is investigated.
+
 ---
 
 ## Installation & Dependencies
