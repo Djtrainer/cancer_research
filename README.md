@@ -48,7 +48,7 @@ This repository is designed for data scientists, bioinformaticians, and research
 --- 
 
 ###  2. Generative Modeling of Drug-Induced Gene Expression (Part I)
-* Notebook: notebooks/drug_induced_gene_expression_prediction.ipynb
+* Notebook: `notebooks/drug_induced_gene_expression_prediction.ipynb`
 
 * **Description**: This project develops a semi-supervised Conditional Variational Autoencoder (CVAE) to model the relationship between a drug's chemical structure and its effect on the human transcriptome. Using LINCS L1000 data, the model learns a compressed latent space that represents the biological state of cells. A classification head, trained on Mechanism of Action (MoA) labels, is used to regularize this space, with the ultimate goal of generating biologically feasible gene expression profiles for novel compounds from their chemical fingerprints alone.
 
