@@ -16,6 +16,6 @@ beta: 0.5
 beta_anneal: False  # Enable beta annealing
 gamma: 0.1
 
-num_epochs: 30
+num_epochs: 10
 learning_rate: 0.00005
 model_save_dir: "models/drug_induced_gene_expression_prediction"
