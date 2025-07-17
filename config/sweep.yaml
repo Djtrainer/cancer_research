@@ -1,0 +1,62 @@
+# The search method
+method: bayes
+
+# The metric to optimize
+metric:
+  name: total_error_to_minimize
+  goal: minimize
+
+# The parameters to search over
+parameters:
+
+  learning_rate:
+    values: [0.00005]
+    
+  latent_dim:
+    values: [64, 128]
+  
+  hidden_dim:
+    values: [256, 512]
+
+  num_encoder_layers:
+    values: [0, 1]
+  
+  encoder_dropout:
+    distribution: uniform
+    min: 0.0
+    max: 0.3
+
+  num_decoder_layers:
+    values: [0, 1]
+  
+  decoder_dropout:
+    distribution: uniform
+    min: 0.0
+    max: 0.3
+
+  condition_emb_dim:
+    values: [64, 128, 256]
+
+  num_molecular_emb_layers:
+    values: [0, 1, 2, 5, 10]
+
+  beta_anneal:
+    values: [False]
+
+  num_epochs:
+    values: [10]
+    
+  gamma:
+    distribution: uniform
+    min: 0.01
+    max: 0.1
+
+  alpha:
+    distribution: uniform
+    min: 1
+    max: 10000
+  
+  beta:
+    distribution: uniform
+    min: 0.1
+    max: 1.0
