@@ -10,13 +10,13 @@ metric:
 parameters:
 
   learning_rate:
-    values: [0.00005]
+    values: [0.00005, 0.0001]
     
   latent_dim:
-    values: [64, 128]
+    values: [32, 64, 128, 256]
   
   hidden_dim:
-    values: [256, 512]
+    values: [128, 256, 512]
 
   num_encoder_layers:
     values: [0, 1]
@@ -35,13 +35,13 @@ parameters:
     max: 0.3
 
   condition_emb_dim:
-    values: [64, 128, 256]
+    values: [32, 64, 128]
 
   num_molecular_emb_layers:
     values: [0, 1, 2, 5, 10]
 
   beta_anneal:
-    values: [False]
+    values: [False, True]
 
   num_epochs:
     values: [10]
@@ -53,7 +53,7 @@ parameters:
 
   alpha:
     distribution: uniform
-    min: 1
+    min: 5000
     max: 10000
   
   beta:
