@@ -1,11 +1,11 @@
 # Configuration for the CVAE model training on drug-induced gene expression prediction
-hidden_dim: 512
+hidden_dim: 128
 num_encoder_layers: 0
 encoder_dropout: 0.1
 
 latent_dim: 32
 
-num_decoder_layers: 1
+num_decoder_layers: 0
 decoder_dropout: 0.3
 
 condition_emb_dim: 128
