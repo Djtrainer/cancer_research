@@ -6,3 +6,7 @@ notebooks/wandb/
 notebooks/drug_induced_gene_expression_prediction copy.ipynb
 imgs/*
 notebooks/drug_induced_gene_expression_prediction/wandb/*
+# Python build artifacts and caches
+__pycache__/
+*.egg-info
+*.pyc
