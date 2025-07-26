@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 import wandb
 
-from eval import evaluate_recon_and_gen_gsea_for_pert, get_recon_correlation
+from .eval import evaluate_recon_and_gen_gsea_for_pert, get_recon_correlation
 
 ROOT = Path(os.getcwd()).parents[1]
 
