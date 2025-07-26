@@ -11,7 +11,7 @@ import torch
 
 
 def get_control_and_test_profiles(
-    pert_id_to_test, pert_id_control, dataset, df_gene, model, device
+    pert_id_to_test, dataset, df_gene_mapping, model, device
 ):
     """
     Get the control and test profiles for a given perturbation ID.
@@ -26,20 +26,17 @@ def get_control_and_test_profiles(
     """
 
     condition_x, expression_x, _ = dataset.get_item_by_pert_id(pert_id_to_test)
-    _, expression_dmso, _ = dataset.get_item_by_pert_id(pert_id_control)
 
     control_profile = dataset.df_expression.mean()
 
     all_gene_names = control_profile.index.tolist()
     all_gene_names = (
-        df_gene[["pr_gene_id", "pr_gene_symbol"]]
-        .set_index("pr_gene_id")
+        df_gene_mapping
         .loc[control_profile.index.astype(int)]
         .values.squeeze()
         .tolist()
     )
     control_x = control_profile.values
-    # control_x = expression_dmso.squeeze().detach().cpu().numpy()
 
     condition_x = condition_x.unsqueeze(0).to(device)
     expression_x = expression_x.unsqueeze(0).to(device)
@@ -104,11 +101,11 @@ def get_gsea_prerank(recon_x, control_np, all_gene_names):
 
 
 def evaluate_recon_and_gen_gsea_for_pert(
-    pert_id_to_test, pert_id_control, val_dataset, df_gene, img_save_path, model, device
+    pert_id_to_test, val_dataset, df_gene_mapping, img_save_path, model, device
 ):
     expression_x, condition_x, recon_x, control_x, all_gene_names = (
         get_control_and_test_profiles(
-            pert_id_to_test, pert_id_control, val_dataset, df_gene, model, device
+            pert_id_to_test, val_dataset, df_gene_mapping, model, device
         )
     )
 
