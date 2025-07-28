@@ -10,3 +10,4 @@ notebooks/drug_induced_gene_expression_prediction/wandb/*
 __pycache__/
 *.egg-info
 *.pyc
+wandb
