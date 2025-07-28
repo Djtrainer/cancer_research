@@ -177,10 +177,15 @@ def evaluate_recon_and_gen_gsea_for_pert(
     return gsea_recon_error, gsea_gen_error
 
 
-def get_recon_correlation(model, train_loader, val_loader, img_save_path):
+def get_recon_correlation(model, train_loader, val_loader, img_save_path, device):
     train_expression = []
     train_reconstruction = []
+    model = model.to(device)
+
     for condition, expression, moa_label in train_loader:
+        condition = condition.to(device)
+        expression = expression.to(device)
+        
         recon_x, mu, log_var = model(expression, condition)
         train_reconstruction.append(recon_x.detach().cpu().numpy())
         train_expression.append(expression.detach().cpu().numpy())
@@ -191,7 +196,11 @@ def get_recon_correlation(model, train_loader, val_loader, img_save_path):
     val_expression = []
     val_reconstruction = []
     for condition, expression, moa_label in val_loader:
+        condition = condition.to(device)
+        expression = expression.to(device)
+
         recon_x, mu, log_var = model(expression, condition)
+
         val_reconstruction.append(recon_x.detach().cpu().numpy())
         val_expression.append(expression.detach().cpu().numpy())
     val_expression = np.vstack(val_expression)
