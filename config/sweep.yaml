@@ -21,7 +21,7 @@ parameters:
     values: [64, 128, 256]
 
   num_encoder_layers:
-    values: [0, 1, 2]
+    values: [0, 1]
   
   encoder_dropout:
     distribution: uniform
@@ -29,7 +29,8 @@ parameters:
     max: 0.3
 
   num_decoder_layers:
-    values: [2, 3, 4]
+    values: [2, 4, 6]
+    # values: [2, 3, 4]
 
   decoder_dropout:
     distribution: uniform

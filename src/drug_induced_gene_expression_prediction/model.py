@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 
 class Encoder(torch.nn.Module):
@@ -287,6 +288,8 @@ class CVAE(torch.nn.Module):
             dropout_rate=decoder_dropout_rate,
         )
 
+        self.use_checkpointing = True 
+
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         """
         Reparameterization trick for sampling from latent space.
@@ -328,10 +331,22 @@ class CVAE(torch.nn.Module):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Reconstructed input, mean, and log-variance tensors.
         """
-        c_embs = self.molecular_embedding(c)
-        x = torch.cat((x, c_embs), dim=1)
-        mu, logvar = self.encoder(x)
-        z = self.reparameterize(mu, logvar)
-        z = torch.cat((z, c_embs), dim=1)
-        x_reconstructed = self.decoder(z)
+        
+        if self.training and self.use_checkpointing:
+            # Checkpoint the major networks to save memory
+            c_embs = checkpoint(self.molecular_embedding, c, use_reentrant=False)
+            x_cat = torch.cat((x, c_embs), dim=1)
+            mu, logvar = checkpoint(self.encoder, x_cat, use_reentrant=False)
+            z = self.reparameterize(mu, logvar)
+            z_cat = torch.cat((z, c_embs), dim=1)
+            x_reconstructed = checkpoint(self.decoder, z_cat, use_reentrant=False)
+        
+        else:
+            c_embs = self.molecular_embedding(c)
+            x = torch.cat((x, c_embs), dim=1)
+            mu, logvar = self.encoder(x)
+            z = self.reparameterize(mu, logvar)
+            z = torch.cat((z, c_embs), dim=1)
+            x_reconstructed = self.decoder(z)
+
         return x_reconstructed, mu, logvar

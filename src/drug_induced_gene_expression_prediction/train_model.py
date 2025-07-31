@@ -10,6 +10,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import bitsandbytes.optim as bnb
+
 from typing import Any
 from tqdm import tqdm
 
@@ -565,9 +567,10 @@ def train_model():
 
             os.makedirs(animation_save_path, exist_ok=True)
             os.makedirs(img_save_path, exist_ok=True)
-            optimizer = torch.optim.Adam(
-                model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
-            )
+            # optimizer = torch.optim.Adam(
+            #     model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+            # )
+            optimizer = bnb.Adam8bit(model.parameters(), lr=config["learning_rate"], weight_decay=1e-5)
             history = {
                 k: []
                 for k in [
@@ -685,7 +688,7 @@ def train_model():
             wandb.finish()
             return model, history
 
-    wandb.agent(sweep_id, function=train_with_sweep, count=100)
+    wandb.agent(sweep_id, function=train_with_sweep, count=500)
 
 
 if __name__ == "__main__":
