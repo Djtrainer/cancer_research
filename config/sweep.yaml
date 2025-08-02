@@ -26,11 +26,10 @@ parameters:
   encoder_dropout:
     distribution: uniform
     min: 0.0
-    max: 0.3
+    max: 0.5
 
   num_decoder_layers:
     values: [2, 4, 6]
-    # values: [2, 3, 4]
 
   decoder_dropout:
     distribution: uniform
@@ -47,7 +46,7 @@ parameters:
     values: [False, True]
 
   num_epochs:
-    values: [10]
+    values: [50]
     
   gamma:
     distribution: uniform
