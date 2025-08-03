@@ -1,19 +1,19 @@
 import os
 from typing import Dict
-import datetime
 
 import matplotlib.pyplot as plt
-import argparse 
+import argparse
 
 import pandas as pd
 import numpy as np
+import random
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import bitsandbytes.optim as bnb
 
-from typing import Any
+from typing import Any, List, Optional, Tuple
 from tqdm import tqdm
 
 import wandb
@@ -42,6 +42,17 @@ PROCESSED_DATA_PATH = os.path.join(
 
 BATCH_SIZE = 64
 
+# Random seed for reproducibility
+SEED = 42
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+random.seed(SEED)
+
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 def _run_epoch(
     model: nn.Module,
@@ -51,7 +62,28 @@ def _run_epoch(
     device: torch.device,
     optimizer: torch.optim.Optimizer = None,
 ) -> Dict[str, float]:
-    """Runs a single epoch of training or evaluation."""
+    """
+    Runs a single epoch of training or evaluation for a VAE-based model with optional classification.
+
+    Args:
+        model (nn.Module): The model to train or evaluate.
+        loader (DataLoader): DataLoader providing batches of (condition, expression, moa_label).
+        config (Dict[str, Any]): Configuration dictionary containing loss weights (e.g., 'alpha', 'gamma').
+        beta (float): Weight for the KL divergence term in the VAE loss.
+        device (torch.device): Device to run computations on (e.g., 'cpu' or 'cuda').
+        optimizer (torch.optim.Optimizer, optional): Optimizer for training. If None, runs in evaluation mode.
+
+    Returns:
+        Dict[str, float]: Dictionary containing average losses for the epoch:
+            - 'loss': Total loss (VAE + classification) averaged over batches.
+            - 'recon': Reconstruction loss averaged over batches.
+            - 'kl': KL divergence loss averaged over batches.
+            - 'class_loss': Classification loss averaged over batches.
+
+    Raises:
+        RuntimeError: If model forward or optimizer step fails.
+        KeyError: If required keys ('alpha', 'gamma') are missing in config.
+    """
     is_training = optimizer is not None
     if is_training:
         model.train()
@@ -59,7 +91,7 @@ def _run_epoch(
         model.eval()
 
     total_loss, total_recon, total_kl, total_class = 0, 0, 0, 0
-    
+
     # Context manager handles torch.no_grad() for evaluation
     with torch.set_grad_enabled(is_training):
         for condition, expression, moa_label in loader:
@@ -90,7 +122,7 @@ def _run_epoch(
                 class_loss = nn.functional.cross_entropy(
                     moa_prediction[mask], moa_label[mask]
                 )
-            
+
             total_epoch_loss = loss + config["gamma"] * class_loss
 
             if is_training:
@@ -102,7 +134,7 @@ def _run_epoch(
             total_recon += recon.item()
             total_kl += kl.item()
             total_class += class_loss.item()
-            
+
     # Return average losses
     num_batches = len(loader)
     return {
@@ -114,20 +146,29 @@ def _run_epoch(
 
 
 def create_animation_frames(
-    epoch_history: list,
+    epoch_history: list[dict],
     animation_dir: str,
     df_meta_test: pd.DataFrame,
-) -> list:
-    """Creates PCA plots for each epoch and saves them as frames."""
-    print("Generating animation frames...")
+) -> list[str]:
+    """
+    Creates PCA plots for each epoch and saves them as image frames for animation.
+
+    Args:
+        epoch_history (list[dict]): List of dictionaries containing embeddings and labels for each epoch.
+        animation_dir (str): Directory to save the animation frames.
+        df_meta_test (pd.DataFrame): Metadata DataFrame for the test set, used for coloring points.
+
+    Returns:
+        list[str]: List of file paths to the saved frame images.
+    """
     # Fit PCA on the final epoch's embeddings for a stable projection
     final_embeddings = epoch_history[-1]["embeddings"]
     pca = PCA(n_components=2, random_state=42)
     pca.fit(final_embeddings)
 
-    frame_files = []
-    all_embeddings = []
-    for i, epoch_data in enumerate(epoch_history):
+    frame_files: list[str] = []
+    all_embeddings: list[np.ndarray] = []
+    for epoch_data in epoch_history:
         # Use the SAME fitted PCA to transform embeddings from every epoch
         projected_embeddings = pca.transform(epoch_data["embeddings"])
         all_embeddings.append(projected_embeddings)
@@ -240,31 +281,41 @@ def create_animation_frames(
 
 
 def build_animation_gif(
-    frame_files: list,
+    frame_files: list[str],
     output_path: str,
     duration: float = 0.5,
-):
-    """Builds a GIF from a list of frame files."""
-    print("Creating animation...")
+) -> None:
+    """
+    Builds a GIF animation from a list of image frame files.
+
+    Args:
+        frame_files (list[str]): List of file paths to image frames.
+        output_path (str): Path to save the output GIF file.
+        duration (float, optional): Duration (seconds) per frame in the GIF. Defaults to 0.5.
+    """
     with imageio.get_writer(output_path, mode="I", duration=duration) as writer:
         for filename in frame_files:
             image = imageio.imread(filename)
             writer.append_data(image)
-    print(f"Animation saved to {output_path}")
 
 
 def plot_pca(
-    embeddings: np.ndarray, labels: pd.Series, title: str = "PCA Plot", axes=None
-) -> None:
+    embeddings: np.ndarray,
+    labels: pd.Series,
+    title: str = "PCA Plot",
+    axes: Optional[plt.Axes] = None,
+) -> plt.Axes:
     """
-    Plot PCA embeddings with color-coded labels.
-
+    Plots a 2D PCA projection of the given embeddings, colored by the provided labels.
     Args:
-        embeddings (np.ndarray): embeddings.
-        labels (pd.Series): Labels for coloring the points.
-        title (str): Title of the plot.
-        axes (plt.Axes, optional): Axes to plot on. If None, creates a new figure.
+        embeddings (np.ndarray): Array of shape (n_samples, n_features) containing the data to project.
+        labels (pd.Series): Series of categorical labels for each sample, used for coloring points.
+        title (str, optional): Title for the plot. Defaults to "PCA Plot".
+        axes (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure and axes are created.
+    Returns:
+        plt.Axes: The matplotlib Axes object containing the PCA plot.
     """
+
     scaler = StandardScaler()
     embeddings = scaler.fit_transform(embeddings)
 
@@ -295,9 +346,30 @@ def plot_pca(
     return axes
 
 
-def generate_embeddings(model, dataset, df_meta_data, device, int_to_moa, batch_size):
+def generate_embeddings(
+    model: torch.nn.Module,
+    dataset: Any,
+    df_meta_data: pd.DataFrame,
+    device: torch.device,
+    int_to_moa: Dict[int, str],
+    batch_size: int,
+) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
-    Generate latent embeddings (mu) and labels for a given dataset.
+    Generates embeddings and corresponding labels from a given model and dataset.
+
+    Args:
+        model (torch.nn.Module): The trained model used to generate embeddings.
+        dataset (Any): Dataset object containing gene expression data.
+        df_meta_data (pd.DataFrame): DataFrame containing metadata for each sample, including fingerprints and MOA labels.
+        device (torch.device): Device to perform computation on (e.g., 'cpu' or 'cuda').
+        int_to_moa (Dict[int, str]): Mapping from integer MOA labels to their string representations.
+        batch_size (int): Number of samples per batch for processing.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, List[str]]:
+            - all_embeddings: Array of embeddings for all samples.
+            - all_labels: Array of integer MOA labels for all samples.
+            - all_moa_labels: List of string MOA labels for all samples.
     """
     model.eval()
     all_embeddings = []
@@ -339,7 +411,25 @@ def generate_embeddings(model, dataset, df_meta_data, device, int_to_moa, batch_
     )
 
 
-def get_data():
+def get_data() -> Tuple:
+    """
+    Loads processed training, validation, and test data, along with metadata and mappings.
+
+    Returns:
+        tuple: (
+            train_loader (DataLoader): DataLoader for training set,
+            val_loader (DataLoader): DataLoader for validation set,
+            test_loader (DataLoader): DataLoader for test set,
+            df_train (pd.DataFrame): Training gene expression data,
+            df_val (pd.DataFrame): Validation gene expression data,
+            df_test (pd.DataFrame): Test gene expression data,
+            df_meta_train (pd.DataFrame): Training metadata,
+            df_meta_val (pd.DataFrame): Validation metadata,
+            df_meta_test (pd.DataFrame): Test metadata,
+            df_gene_mapping (pd.DataFrame): Gene mapping DataFrame,
+            int_to_moa (Dict[int, str]): Mapping from integer MOA labels to strings
+        )
+    """
     df_train = pd.read_parquet(os.path.join(PROCESSED_DATA_PATH, "train_data.parquet"))
     df_val = pd.read_parquet(os.path.join(PROCESSED_DATA_PATH, "val_data.parquet"))
     df_test = pd.read_parquet(os.path.join(PROCESSED_DATA_PATH, "test_data.parquet"))
@@ -384,28 +474,36 @@ def get_data():
     )
 
 
-def get_model_weights(expression_dim, num_classes, conditional_dim, config):
-    # # Initialize the CVAE model
+def get_model_weights(
+    expression_dim: int,
+    num_classes: int,
+    conditional_dim: int,
+    config: Dict[str, Any],
+) -> CVAE:
+    """
+    Initializes and returns a CVAE model with the specified configuration.
+
+    Args:
+        expression_dim (int): Number of gene expression features.
+        num_classes (int): Number of MOA classes.
+        conditional_dim (int): Dimension of the condition (fingerprint) vector.
+        config (Dict[str, Any]): Dictionary containing model hyperparameters.
+
+    Returns:
+        CVAE: Initialized CVAE model on the appropriate device.
+    """
     model = CVAE(
-        expression_dim=expression_dim,  # df_train.shape[1],  # Number of genes
-        num_classes=num_classes,  # df_meta_train["moa_int"].nunique(),  # Number of MOA classes + 1 for "Other"
-        condition_dim=conditional_dim,  # df_meta_train["fingerprint"].iloc[0].shape[0],  # Fingerprint size
-        hidden_dim=config["hidden_dim"],  # Hidden dimension for the encoder and decoder
-        latent_dim=config["latent_dim"],  # Latent space dimension
-        num_encoder_layers=config[
-            "num_encoder_layers"
-        ],  # Number of layers in the encoder
-        encoder_dropout_rate=config["encoder_dropout"],  # Dropout rate for the encoder
-        num_decoder_layers=config[
-            "num_decoder_layers"
-        ],  # Number of layers in the decoder
-        condition_emb_dim=config[
-            "condition_emb_dim"
-        ],  # Embedding dimension for the condition (fingerprint)
-        decoder_dropout_rate=config["decoder_dropout"],  # Dropout rate for the decoder
-        num_molecular_emb_layers=config[
-            "num_molecular_emb_layers"
-        ],  # Number of layers in the molecular embedding
+        expression_dim=expression_dim,
+        num_classes=num_classes,
+        condition_dim=conditional_dim,
+        hidden_dim=config["hidden_dim"],
+        latent_dim=config["latent_dim"],
+        num_encoder_layers=config["num_encoder_layers"],
+        encoder_dropout_rate=config["encoder_dropout"],
+        num_decoder_layers=config["num_decoder_layers"],
+        condition_emb_dim=config["condition_emb_dim"],
+        decoder_dropout_rate=config["decoder_dropout"],
+        num_molecular_emb_layers=config["num_molecular_emb_layers"],
     )
 
     model = model.to(DEVICE)
@@ -413,28 +511,50 @@ def get_model_weights(expression_dim, num_classes, conditional_dim, config):
     return model
 
 
-def setup_directories(config):
-    # Set up directories for saving images and animations
-    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    img_save_dir = f"{now}_{config['latent_dim']}latent_{config['hidden_dim']}hidden_{config['num_encoder_layers']}enclayers_{config['encoder_dropout']:.2f}do_{config['condition_emb_dim']}condembs_{config['learning_rate']:.2f}lr_{config['alpha']:.2f}a_{config['beta']:.2f}b_{config['gamma']:.2f}g_{config['num_molecular_emb_layers']}condlayers_{config['num_decoder_layers']}declayers"
-    img_save_path = os.path.join("data", "model_runs", img_save_dir)
+def setup_directories(
+    config: Dict[str, Any], run: wandb.sdk.wandb_run.Run
+) -> Tuple[str, str]:
+    """
+    Sets up directories for saving images and animation frames during training.
+
+    Args:
+        config (Dict[str, Any]): Dictionary containing model and training hyperparameters.
+        run (wandb.sdk.wandb_run.Run): The current Weights & Biases run object.
+
+    Returns:
+        Tuple[str, str]:
+            - img_save_path: Path to save images and results for the run.
+            - animation_save_path: Path to save animation frame images.
+    """
+    # Use the immutable run ID for the directory name
+    run_id = run.id
+    run_name = run.name.split("-")[-1] if run.name else "default_run"
+    # Use the sweep ID to group sweep runs, or use a default for single runs
+    base_path_name = run.sweep_id if run.sweep_id else "single_runs"
+
+    # Create a descriptive directory name using the unique ID
+    img_save_dir = f"{run_name}_{run.name}_{run_id}_{config['latent_dim']}latent_{config['hidden_dim']}hidden_{config['num_encoder_layers']}enclayers_{config['encoder_dropout']:.2f}do_{config['condition_emb_dim']}condembs_{config['learning_rate']:.2f}lr_{config['alpha']:.2f}a_{config['beta']:.2f}b_{config['gamma']:.2f}g_{config['num_molecular_emb_layers']}condlayers_{config['num_decoder_layers']}declayers"
+
+    img_save_path = os.path.join(
+        "data", "hyperparameter_runs", base_path_name, img_save_dir
+    )
     animation_save_path = os.path.join(img_save_path, "animation_frames")
     os.makedirs(animation_save_path, exist_ok=True)
-    os.makedirs(img_save_path, exist_ok=True)
 
     return img_save_path, animation_save_path
 
 
-def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False):
-    """The core training and evaluation pipeline."""
-    
-    # Initialize wandb if not already in a sweep agent's run
-    if not is_sweep:
-        now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_name = f"{now}_{config['latent_dim']}latent_..." # Your run name logic
-        wandb.init(project="drug-induced-gene-expression-prediction", config=config, name=run_name)
-    
-    # This will use wandb.config if called from a sweep
+def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> None:
+    """
+    Runs the training pipeline for the CVAE model, including training, validation, logging,
+    animation creation, and evaluation.
+
+    Args:
+        config (Dict[str, Any]): Dictionary containing model and training hyperparameters.
+        is_sweep (bool, optional): Whether the run is part of a hyperparameter sweep. Defaults to False.
+
+    """
+    wandb.init(project="drug-induced-gene-expression-prediction", config=config)
     config = wandb.config
     (
         train_loader,
@@ -462,7 +582,7 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False):
         model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
     )
 
-    img_save_path, animation_save_path = setup_directories(config)
+    img_save_path, animation_save_path = setup_directories(config, wandb.run)
     history = {
         k: []
         for k in [
@@ -476,20 +596,21 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False):
             "val_class_loss",
         ]
     }
-    
+
     animation_data = []
-    
+
     # Main Training Loop
     pbar_epochs = tqdm(range(1, config["num_epochs"] + 1), desc="Overall Progress")
     for epoch in pbar_epochs:
         beta = (
-            config["beta"]
-            * ((epoch - 1) / config["num_epochs"])
+            config["beta"] * ((epoch - 1) / config["num_epochs"])
             if config.get("beta_anneal")
             else config["beta"]
         )
 
-        train_metrics = _run_epoch(model, train_loader, config, beta, DEVICE, optimizer=optimizer)
+        train_metrics = _run_epoch(
+            model, train_loader, config, beta, DEVICE, optimizer=optimizer
+        )
         val_metrics = _run_epoch(model, val_loader, config, beta, DEVICE)
 
         for key in train_metrics:
@@ -535,7 +656,7 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False):
             }
         )
 
-    evaluate_recon_and_gen_gsea_for_pert(
+    gsea_recon_error, gsea_gen_error = evaluate_recon_and_gen_gsea_for_pert(
         pert_id_to_test="BRD-A00993607",
         val_dataset=val_loader.dataset,
         df_gene_mapping=df_gene_mapping,
@@ -544,365 +665,79 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False):
         device=DEVICE,
     )
 
-    get_recon_correlation(
+    train_corr, val_corr = get_recon_correlation(
         model, train_loader, val_loader, img_save_path, device=DEVICE
     )
-    
+
+    total_error_to_minimize = (
+        gsea_recon_error + gsea_gen_error + (1 - train_corr) + (1 - val_corr)
+    )
+    wandb.log(
+        {
+            "gsea_gen_error": gsea_gen_error,
+            "gsea_recon_error": gsea_recon_error,
+            "train_corr": train_corr,
+            "val_corr": val_corr,
+            "total_error_to_minimize": total_error_to_minimize,
+        }
+    )
     # Create and Log Animation
     frame_files = create_animation_frames(
         animation_data, animation_save_path, df_meta_test
     )
     animation_path = os.path.join(animation_save_path, "training_animation.gif")
     build_animation_gif(frame_files, animation_path, duration=0.5)
-    wandb.log(
-        {"training_animation": wandb.Video(animation_path, fps=2, format="gif")}
-    )
+    wandb.log({"training_animation": wandb.Video(animation_path, fps=2, format="gif")})
     plot_training_history(history)
     plt.savefig(os.path.join(img_save_path, "training_history.png"))
-    
-    if not is_sweep:
+
+    if is_sweep:
         wandb.finish()
 
 
-def sweep_train_model(sweep_config):
-
-    sweep_id = wandb.sweep(
-        sweep_config, project="drug_induced_gene_expression_prediction"
-    )
-    (
-        train_loader,
-        val_loader,
-        test_loader,
-        df_train,
-        _,
-        _,
-        df_meta_train,
-        _,
-        df_meta_test,
-        df_gene_mapping,
-        int_to_moa,
-    ) = get_data()
-
-    def train_with_sweep():
-        with wandb.init() as run:
-            config = wandb.config
-
-            model = get_model_weights(
-                expression_dim=df_train.shape[1],
-                num_classes=df_meta_train["moa_int"].nunique(),
-                conditional_dim=df_meta_train["fingerprint"].iloc[0].shape[0],
-                config=config,
-            )
-
-            # Set up directories for saving images and animations
-            sweep_name = run.sweep_id
-            run_name = run.name
-            run_id = run.name.split("-")[-1]
-            img_save_dir = f"{run_id}_{run_name}_cvae_model_{config['latent_dim']}latent_{config['hidden_dim']}hidden_{config['num_encoder_layers']}enclayers_{config['encoder_dropout']:.2f}do_{config['condition_emb_dim']}condembs_{config['learning_rate']:.2f}lr_{config['alpha']:.2f}a_{config['beta']:.2f}b_{config['gamma']:.2f}g_{config['num_molecular_emb_layers']}condlayers_{config['num_decoder_layers']}declayers"
-            img_save_path = os.path.join(
-                "data", "hyperparameter_runs", sweep_name, img_save_dir
-            )
-            animation_save_path = os.path.join(
-                "data",
-                "hyperparameter_runs",
-                sweep_name,
-                img_save_dir,
-                "animation_frames",
-            )
-            os.makedirs(animation_save_path, exist_ok=True)
-            os.makedirs(img_save_path, exist_ok=True)
-            
-            # Initialize BnB
-            optimizer = bnb.Adam8bit(
-                model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
-            )
-            history = {
-                k: []
-                for k in [
-                    "train_loss",
-                    "val_loss",
-                    "train_recon",
-                    "val_recon",
-                    "train_kl",
-                    "val_kl",
-                    "train_class_loss",
-                    "val_class_loss",
-                ]
-            }
-            animation_data = []
-
-            # Main Training Loop
-            pbar_epochs = tqdm(
-                range(1, config["num_epochs"] + 1), desc="Overall Progress"
-            )
-            for epoch in pbar_epochs:
-                beta = (
-                    config["beta"] * ((epoch - 1) / config["num_epochs"])
-                    if config.get("beta_anneal")
-                    else config["beta"]
-                )
-
-                train_metrics = _run_epoch(model, train_loader, config, beta, DEVICE, optimizer=optimizer)
-                val_metrics = _run_epoch(model, val_loader, config, beta, DEVICE)
-
-                for key in train_metrics:
-                    history[f"train_{key}"].append(train_metrics[key])
-                    history[f"val_{key}"].append(val_metrics[key])
-
-                wandb.log(
-                    {
-                        "Train Loss": train_metrics["loss"],
-                        "Val Loss": val_metrics["loss"],
-                        "Train Recon": train_metrics["recon"],
-                        "Val Recon": val_metrics["recon"],
-                        "Train KL": train_metrics["kl"],
-                        "Val KL": val_metrics["kl"],
-                        "Train Class Loss": train_metrics["class_loss"],
-                        "Val Class Loss": val_metrics["class_loss"],
-                        "Beta": beta,
-                        "Epoch": epoch,
-                    },
-                    step=epoch,
-                )
-
-                # Generate and store data for animation
-                test_embeddings, test_labels, _ = generate_embeddings(
-                    model=model,
-                    dataset=test_loader.dataset,
-                    df_meta_data=df_meta_test,
-                    device=DEVICE,
-                    int_to_moa=int_to_moa,
-                    batch_size=test_loader.batch_size,
-                )
-                animation_data.append(
-                    {
-                        "embeddings": test_embeddings,
-                        "labels": test_labels,
-                        "pert_labels": df_meta_test["pert_id"].tolist(),
-                    }
-                )
-                pbar_epochs.set_postfix(
-                    {
-                        "Train Loss": f"{train_metrics['loss']:.4f}",
-                        "Val Loss": f"{val_metrics['loss']:.4f}",
-                    }
-                )
-
-            gsea_recon_error, gsea_gen_error = evaluate_recon_and_gen_gsea_for_pert(
-                pert_id_to_test="BRD-A00993607",
-                val_dataset=val_loader.dataset,
-                df_gene_mapping=df_gene_mapping,
-                img_save_path=img_save_path,
-                model=model,
-                device=DEVICE,
-            )
-
-            train_corr, val_corr = get_recon_correlation(
-                model, train_loader, val_loader, img_save_path, device=DEVICE
-            )
-
-            total_error_to_minimize = (
-                gsea_recon_error + gsea_gen_error + (1 - train_corr) + (1 - val_corr)
-            )
-            wandb.log(
-                {
-                    "gsea_gen_error": gsea_gen_error,
-                    "gsea_recon_error": gsea_recon_error,
-                    "train_corr": train_corr,
-                    "val_corr": val_corr,
-                    "total_error_to_minimize": total_error_to_minimize,
-                }
-            )
-            # Create and Log Animation
-            frame_files = create_animation_frames(
-                animation_data, animation_save_path, df_meta_test
-            )
-            animation_path = os.path.join(animation_save_path, "training_animation.gif")
-            build_animation_gif(frame_files, animation_path, duration=0.5)
-            wandb.log(
-                {"training_animation": wandb.Video(animation_path, fps=2, format="gif")}
-            )
-            plot_training_history(history)
-            plt.savefig(os.path.join(img_save_path, "training_history.png"))
-
-            # Cleanup and Return
-            wandb.finish()
-            return model, history
-
-    wandb.agent(sweep_id, function=train_with_sweep, count=500)
-
-
-def train_model(config):
-
-    (
-        train_loader,
-        val_loader,
-        test_loader,
-        df_train,
-        df_val,
-        df_test,
-        df_meta_train,
-        df_meta_val,
-        df_meta_test,
-        df_gene_mapping,
-        int_to_moa,
-    ) = get_data()
-
-    model = get_model_weights(
-        expression_dim=df_train.shape[1],
-        num_classes=df_meta_train["moa_int"].nunique(),
-        conditional_dim=df_meta_train["fingerprint"].iloc[0].shape[0],
-        config=config,
-    )
-
-    # Set up directories for saving images and animations
-    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    img_save_dir = f"{now}_{config['latent_dim']}latent_{config['hidden_dim']}hidden_{config['num_encoder_layers']}enclayers_{config['encoder_dropout']:.2f}do_{config['condition_emb_dim']}condembs_{config['learning_rate']:.2f}lr_{config['alpha']:.2f}a_{config['beta']:.2f}b_{config['gamma']:.2f}g_{config['num_molecular_emb_layers']}condlayers_{config['num_decoder_layers']}declayers"
-    img_save_path = os.path.join("data", "model_runs", img_save_dir)
-    animation_save_path = os.path.join(img_save_path, "animation_frames")
-    os.makedirs(animation_save_path, exist_ok=True)
-    os.makedirs(img_save_path, exist_ok=True)
-    
-    wandb.init(
-        project="drug-induced-gene-expression-prediction", config=config, name=img_save_dir
-    )
-    # Initialize BnB
-    optimizer = bnb.Adam8bit(
-        model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
-    )
-    
-    history = {
-        k: []
-        for k in [
-            "train_loss",
-            "val_loss",
-            "train_recon",
-            "val_recon",
-            "train_kl",
-            "val_kl",
-            "train_class_loss",
-            "val_class_loss",
-        ]
-    }
-    
-    animation_data = []
-    
-    # Main Training Loop
-    pbar_epochs = tqdm(range(1, config["num_epochs"] + 1), desc="Overall Progress")
-    for epoch in pbar_epochs:
-        beta = (
-            config["beta"]
-            * ((epoch - 1) / config["num_epochs"])
-            if config.get("beta_anneal")
-            else config["beta"]
-        )
-
-        train_metrics = _run_epoch(model, train_loader, config, beta, DEVICE, optimizer=optimizer)
-        val_metrics = _run_epoch(model, val_loader, config, beta, DEVICE)
-
-        for key in train_metrics:
-            history[f"train_{key}"].append(train_metrics[key])
-            history[f"val_{key}"].append(val_metrics[key])
-
-        wandb.log(
-            {
-                "Train Loss": train_metrics["loss"],
-                "Val Loss": val_metrics["loss"],
-                "Train Recon": train_metrics["recon"],
-                "Val Recon": val_metrics["recon"],
-                "Train KL": train_metrics["kl"],
-                "Val KL": val_metrics["kl"],
-                "Train Class Loss": train_metrics["class_loss"],
-                "Val Class Loss": val_metrics["class_loss"],
-                "Beta": beta,
-                "Epoch": epoch,
-            },
-            step=epoch,
-        )
-
-        # Generate and store data for animation
-        test_embeddings, test_labels, _ = generate_embeddings(
-            model=model,
-            dataset=test_loader.dataset,
-            df_meta_data=df_meta_test,
-            device=DEVICE,
-            int_to_moa=int_to_moa,
-            batch_size=test_loader.batch_size,
-        )
-        animation_data.append(
-            {
-                "embeddings": test_embeddings,
-                "labels": test_labels,
-                "pert_labels": df_meta_test["pert_id"].tolist(),
-            }
-        )
-        pbar_epochs.set_postfix(
-            {
-                "Train Loss": f"{train_metrics['loss']:.4f}",
-                "Val Loss": f"{val_metrics['loss']:.4f}",
-            }
-        )
-
-    evaluate_recon_and_gen_gsea_for_pert(
-        pert_id_to_test="BRD-A00993607",
-        val_dataset=val_loader.dataset,
-        df_gene_mapping=df_gene_mapping,
-        img_save_path=img_save_path,
-        model=model,
-        device=DEVICE,
-    )
-
-    get_recon_correlation(
-        model, train_loader, val_loader, img_save_path, device=DEVICE
-    )
-    
-    # Create and Log Animation
-    frame_files = create_animation_frames(
-        animation_data, animation_save_path, df_meta_test
-    )
-    animation_path = os.path.join(animation_save_path, "training_animation.gif")
-    build_animation_gif(frame_files, animation_path, duration=0.5)
-    wandb.log(
-        {"training_animation": wandb.Video(animation_path, fps=2, format="gif")}
-    )
-    plot_training_history(history)
-    plt.savefig(os.path.join(img_save_path, "training_history.png"))
-
-    wandb.finish()
-
-
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description="Train a CVAE model for drug-induced gene expression prediction.")
+    parser = argparse.ArgumentParser(
+        description="Train a CVAE model for drug-induced gene expression prediction."
+    )
     parser.add_argument(
-        "--mode", 
-        type=str, 
+        "--mode",
+        type=str,
         choices=["sweep", "train"],
         default="train",
-        help="Mode to run: 'sweep' for hyperparameter sweep, 'train' for training a single model."
+        help="Mode to run: 'sweep' for hyperparameter sweep, 'train' for training a single model.",
     )
     args = parser.parse_args()
     if args.mode == "sweep":
         # Start hyperparameter sweep
         with open(
-            os.path.join("config", "drug_induced_gene_expression_prediction", "sweep_parameters.yaml"),
+            os.path.join(
+                "config",
+                "drug_induced_gene_expression_prediction",
+                "sweep_parameters.yaml",
+            ),
             "r",
         ) as file:
             config = yaml.safe_load(file)
 
-        sweep_id = wandb.sweep(config, project="drug-induced-gene-expression-prediction")
+        sweep_id = wandb.sweep(
+            config, project="drug-induced-gene-expression-prediction"
+        )
 
         def sweep_agent_func():
             run_training_pipeline(config=None, is_sweep=True)
-            
+
         wandb.agent(sweep_id, function=sweep_agent_func, count=500)
 
     else:
         # Train a single model
         with open(
-            os.path.join("config", "drug_induced_gene_expression_prediction", "model_parameters.yaml"),
+            os.path.join(
+                "config",
+                "drug_induced_gene_expression_prediction",
+                "model_parameters.yaml",
+            ),
             "r",
         ) as file:
             config = yaml.safe_load(file)
-        
-        run_training_pipeline(config, is_sweep=False)
+
+        run_training_pipeline(config)

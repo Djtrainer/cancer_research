@@ -46,7 +46,7 @@ parameters:
     values: [False, True]
 
   num_epochs:
-    values: [50]
+    values: [10]
     
   gamma:
     distribution: uniform
