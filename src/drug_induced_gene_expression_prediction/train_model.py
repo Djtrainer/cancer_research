@@ -43,83 +43,35 @@ PROCESSED_DATA_PATH = os.path.join(
 BATCH_SIZE = 64
 
 
-def train_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    config: Dict[str, Any],
-    beta: float,
-    device: torch.device,
-) -> Dict[str, float]:
-    """Runs a single training epoch."""
-    model.train()
-    total_loss, total_recon, total_kl, total_class = 0, 0, 0, 0
-
-    for condition, expression, moa_label in loader:
-        expression, condition, moa_label = (
-            expression.to(device),
-            condition.to(device),
-            moa_label.to(device),
-        )
-
-        optimizer.zero_grad()
-        recon_x, mu, log_var = model(expression, condition)
-        moa_prediction = model.classify(mu)
-
-        # Calculate VAE and classification loss
-        loss, recon, kl = vae_loss_function(
-            recon_x,
-            expression,
-            mu,
-            log_var,
-            model.latent_dim,
-            beta,
-            recon_weight=config["alpha"],
-        )
-        mask = moa_label != -1
-        class_loss = torch.tensor(0.0, device=device)
-        if mask.sum() > 0:
-            class_loss = nn.functional.cross_entropy(
-                moa_prediction[mask], moa_label[mask]
-            )
-
-        total_epoch_loss = loss + config["gamma"] * class_loss
-        total_epoch_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-
-        total_loss += total_epoch_loss.item()
-        total_recon += recon.item()
-        total_kl += kl.item()
-        total_class += class_loss.item()
-
-    # Return average losses for the epoch
-    return {
-        "loss": total_loss / len(loader),
-        "recon": total_recon / len(loader),
-        "kl": total_kl / len(loader),
-        "class_loss": total_class / len(loader),
-    }
-
-
-def evaluate_epoch(
+def _run_epoch(
     model: nn.Module,
     loader: DataLoader,
     config: Dict[str, Any],
     beta: float,
     device: torch.device,
+    optimizer: torch.optim.Optimizer = None,
 ) -> Dict[str, float]:
-    """Runs a single validation/evaluation epoch."""
-    model.eval()
-    total_loss, total_recon, total_kl, total_class = 0, 0, 0, 0
+    """Runs a single epoch of training or evaluation."""
+    is_training = optimizer is not None
+    if is_training:
+        model.train()
+    else:
+        model.eval()
 
-    with torch.no_grad():
+    total_loss, total_recon, total_kl, total_class = 0, 0, 0, 0
+    
+    # Context manager handles torch.no_grad() for evaluation
+    with torch.set_grad_enabled(is_training):
         for condition, expression, moa_label in loader:
             expression, condition, moa_label = (
                 expression.to(device),
                 condition.to(device),
                 moa_label.to(device),
             )
+
+            if is_training:
+                optimizer.zero_grad()
+
             recon_x, mu, log_var = model(expression, condition)
             moa_prediction = model.classify(mu)
 
@@ -138,19 +90,26 @@ def evaluate_epoch(
                 class_loss = nn.functional.cross_entropy(
                     moa_prediction[mask], moa_label[mask]
                 )
-
+            
             total_epoch_loss = loss + config["gamma"] * class_loss
+
+            if is_training:
+                total_epoch_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
 
             total_loss += total_epoch_loss.item()
             total_recon += recon.item()
             total_kl += kl.item()
             total_class += class_loss.item()
-
+            
+    # Return average losses
+    num_batches = len(loader)
     return {
-        "loss": total_loss / len(loader),
-        "recon": total_recon / len(loader),
-        "kl": total_kl / len(loader),
-        "class_loss": total_class / len(loader),
+        "loss": total_loss / num_batches,
+        "recon": total_recon / num_batches,
+        "kl": total_kl / num_batches,
+        "class_loss": total_class / num_batches,
     }
 
 
@@ -454,6 +413,157 @@ def get_model_weights(expression_dim, num_classes, conditional_dim, config):
     return model
 
 
+def setup_directories(config):
+    # Set up directories for saving images and animations
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    img_save_dir = f"{now}_{config['latent_dim']}latent_{config['hidden_dim']}hidden_{config['num_encoder_layers']}enclayers_{config['encoder_dropout']:.2f}do_{config['condition_emb_dim']}condembs_{config['learning_rate']:.2f}lr_{config['alpha']:.2f}a_{config['beta']:.2f}b_{config['gamma']:.2f}g_{config['num_molecular_emb_layers']}condlayers_{config['num_decoder_layers']}declayers"
+    img_save_path = os.path.join("data", "model_runs", img_save_dir)
+    animation_save_path = os.path.join(img_save_path, "animation_frames")
+    os.makedirs(animation_save_path, exist_ok=True)
+    os.makedirs(img_save_path, exist_ok=True)
+
+    return img_save_path, animation_save_path
+
+
+def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False):
+    """The core training and evaluation pipeline."""
+    
+    # Initialize wandb if not already in a sweep agent's run
+    if not is_sweep:
+        now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        run_name = f"{now}_{config['latent_dim']}latent_..." # Your run name logic
+        wandb.init(project="drug-induced-gene-expression-prediction", config=config, name=run_name)
+    
+    # This will use wandb.config if called from a sweep
+    config = wandb.config
+    (
+        train_loader,
+        val_loader,
+        test_loader,
+        df_train,
+        _,
+        _,
+        df_meta_train,
+        _,
+        df_meta_test,
+        df_gene_mapping,
+        int_to_moa,
+    ) = get_data()
+
+    model = get_model_weights(
+        expression_dim=df_train.shape[1],
+        num_classes=df_meta_train["moa_int"].nunique(),
+        conditional_dim=df_meta_train["fingerprint"].iloc[0].shape[0],
+        config=config,
+    )
+
+    # Initialize BnB
+    optimizer = bnb.Adam8bit(
+        model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+    )
+
+    img_save_path, animation_save_path = setup_directories(config)
+    history = {
+        k: []
+        for k in [
+            "train_loss",
+            "val_loss",
+            "train_recon",
+            "val_recon",
+            "train_kl",
+            "val_kl",
+            "train_class_loss",
+            "val_class_loss",
+        ]
+    }
+    
+    animation_data = []
+    
+    # Main Training Loop
+    pbar_epochs = tqdm(range(1, config["num_epochs"] + 1), desc="Overall Progress")
+    for epoch in pbar_epochs:
+        beta = (
+            config["beta"]
+            * ((epoch - 1) / config["num_epochs"])
+            if config.get("beta_anneal")
+            else config["beta"]
+        )
+
+        train_metrics = _run_epoch(model, train_loader, config, beta, DEVICE, optimizer=optimizer)
+        val_metrics = _run_epoch(model, val_loader, config, beta, DEVICE)
+
+        for key in train_metrics:
+            history[f"train_{key}"].append(train_metrics[key])
+            history[f"val_{key}"].append(val_metrics[key])
+
+        wandb.log(
+            {
+                "Train Loss": train_metrics["loss"],
+                "Val Loss": val_metrics["loss"],
+                "Train Recon": train_metrics["recon"],
+                "Val Recon": val_metrics["recon"],
+                "Train KL": train_metrics["kl"],
+                "Val KL": val_metrics["kl"],
+                "Train Class Loss": train_metrics["class_loss"],
+                "Val Class Loss": val_metrics["class_loss"],
+                "Beta": beta,
+                "Epoch": epoch,
+            },
+            step=epoch,
+        )
+
+        # Generate and store data for animation
+        test_embeddings, test_labels, _ = generate_embeddings(
+            model=model,
+            dataset=test_loader.dataset,
+            df_meta_data=df_meta_test,
+            device=DEVICE,
+            int_to_moa=int_to_moa,
+            batch_size=test_loader.batch_size,
+        )
+        animation_data.append(
+            {
+                "embeddings": test_embeddings,
+                "labels": test_labels,
+                "pert_labels": df_meta_test["pert_id"].tolist(),
+            }
+        )
+        pbar_epochs.set_postfix(
+            {
+                "Train Loss": f"{train_metrics['loss']:.4f}",
+                "Val Loss": f"{val_metrics['loss']:.4f}",
+            }
+        )
+
+    evaluate_recon_and_gen_gsea_for_pert(
+        pert_id_to_test="BRD-A00993607",
+        val_dataset=val_loader.dataset,
+        df_gene_mapping=df_gene_mapping,
+        img_save_path=img_save_path,
+        model=model,
+        device=DEVICE,
+    )
+
+    get_recon_correlation(
+        model, train_loader, val_loader, img_save_path, device=DEVICE
+    )
+    
+    # Create and Log Animation
+    frame_files = create_animation_frames(
+        animation_data, animation_save_path, df_meta_test
+    )
+    animation_path = os.path.join(animation_save_path, "training_animation.gif")
+    build_animation_gif(frame_files, animation_path, duration=0.5)
+    wandb.log(
+        {"training_animation": wandb.Video(animation_path, fps=2, format="gif")}
+    )
+    plot_training_history(history)
+    plt.savefig(os.path.join(img_save_path, "training_history.png"))
+    
+    if not is_sweep:
+        wandb.finish()
+
+
 def sweep_train_model(sweep_config):
 
     sweep_id = wandb.sweep(
@@ -532,10 +642,8 @@ def sweep_train_model(sweep_config):
                     else config["beta"]
                 )
 
-                train_metrics = train_epoch(
-                    model, train_loader, optimizer, config, beta, DEVICE
-                )
-                val_metrics = evaluate_epoch(model, val_loader, config, beta, DEVICE)
+                train_metrics = _run_epoch(model, train_loader, config, beta, DEVICE, optimizer=optimizer)
+                val_metrics = _run_epoch(model, val_loader, config, beta, DEVICE)
 
                 for key in train_metrics:
                     history[f"train_{key}"].append(train_metrics[key])
@@ -688,10 +796,10 @@ def train_model(config):
             if config.get("beta_anneal")
             else config["beta"]
         )
-        train_metrics = train_epoch(
-            model, train_loader, optimizer, config, beta, DEVICE
-        )
-        val_metrics = evaluate_epoch(model, val_loader, config, beta, DEVICE)
+
+        train_metrics = _run_epoch(model, train_loader, config, beta, DEVICE, optimizer=optimizer)
+        val_metrics = _run_epoch(model, val_loader, config, beta, DEVICE)
+
         for key in train_metrics:
             history[f"train_{key}"].append(train_metrics[key])
             history[f"val_{key}"].append(val_metrics[key])
@@ -781,7 +889,14 @@ if __name__ == "__main__":
             "r",
         ) as file:
             config = yaml.safe_load(file)
-        sweep_train_model(config)
+
+        sweep_id = wandb.sweep(config, project="drug-induced-gene-expression-prediction")
+
+        def sweep_agent_func():
+            run_training_pipeline(config=None, is_sweep=True)
+            
+        wandb.agent(sweep_id, function=sweep_agent_func, count=500)
+
     else:
         # Train a single model
         with open(
@@ -789,4 +904,5 @@ if __name__ == "__main__":
             "r",
         ) as file:
             config = yaml.safe_load(file)
-        train_model(config)
+        
+        run_training_pipeline(config, is_sweep=False)
