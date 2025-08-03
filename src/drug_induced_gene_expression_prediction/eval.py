@@ -101,7 +101,7 @@ def get_gsea_prerank(recon_x, control_np, all_gene_names):
 
 
 def evaluate_recon_and_gen_gsea_for_pert(
-    pert_id_to_test, val_dataset, df_gene_mapping, img_save_path, model, device
+    pert_id_to_test, drug_name, val_dataset, df_gene_mapping, img_save_path, model, device
 ):
     expression_x, condition_x, recon_x, control_x, all_gene_names = (
         get_control_and_test_profiles(
@@ -167,12 +167,12 @@ def evaluate_recon_and_gen_gsea_for_pert(
     # Add a vertical line at zero for reference
     ax.axvline(0, color="black", lw=1)
     ax.grid(False)
-    ax.set_title("GSEA Comparison for Bortezomib", fontsize=16)
+    ax.set_title(f"GSEA Comparison for {drug_name}", fontsize=16)
     ax.set_xlabel("Normalized Enrichment Score (NES)", fontsize=12)
     ax.set_ylabel("")
     plt.legend(title="Profile Source")
 
-    plt.savefig(os.path.join(img_save_path, "gsea_comparison.png"))
+    plt.savefig(os.path.join(img_save_path, f"gsea_comparison_{drug_name}.png"))
 
     return gsea_recon_error, gsea_gen_error
 

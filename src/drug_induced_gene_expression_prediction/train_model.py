@@ -577,10 +577,15 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> Non
         config=config,
     )
 
-    # Initialize BnB
-    optimizer = bnb.Adam8bit(
-        model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
-    )
+    if torch.cuda.is_available():
+        # Initialize BnB
+        optimizer = bnb.Adam8bit(
+            model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+        )
+    else:
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+        )
 
     img_save_path, animation_save_path = setup_directories(config, wandb.run)
     history = {
@@ -656,14 +661,26 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> Non
             }
         )
 
-    gsea_recon_error, gsea_gen_error = evaluate_recon_and_gen_gsea_for_pert(
-        pert_id_to_test="BRD-A00993607",
-        val_dataset=val_loader.dataset,
-        df_gene_mapping=df_gene_mapping,
-        img_save_path=img_save_path,
-        model=model,
-        device=DEVICE,
-    )
+    gsea_gen_error_list, gsea_recon_error_list = [], []
+    for pert_id, drug_name in [
+        ("BRD-A00993607", "Bortezomib"),
+        ("BRD-K01800709", "Trichostatin A"),
+        ("BRD-K29699988", "Erlotinib"),
+    ]:
+        recon_error, gen_error = evaluate_recon_and_gen_gsea_for_pert(
+            pert_id_to_test=pert_id,
+            drug_name=drug_name,
+            val_dataset=val_loader.dataset,
+            df_gene_mapping=df_gene_mapping,
+            img_save_path=img_save_path,
+            model=model,
+            device=DEVICE,
+        )
+        gsea_gen_error_list.append(gen_error)
+        gsea_recon_error_list.append(recon_error)
+
+    gsea_recon_error = np.mean(gsea_recon_error_list)
+    gsea_gen_error = np.mean(gsea_gen_error_list)
 
     train_corr, val_corr = get_recon_correlation(
         model, train_loader, val_loader, img_save_path, device=DEVICE
