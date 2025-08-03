@@ -1,8 +1,9 @@
 import os
-from pathlib import Path
 from typing import Dict
+import datetime
 
 import matplotlib.pyplot as plt
+import argparse 
 
 import pandas as pd
 import numpy as np
@@ -424,35 +425,12 @@ def get_data():
     )
 
 
-def get_model_weights():
-    (
-        train_loader,
-        val_loader,
-        test_loader,
-        df_train,
-        df_val,
-        df_test,
-        df_meta_train,
-        df_meta_val,
-        df_meta_test,
-        df_gene_mapping,
-        int_to_moa,
-    ) = get_data()
-
-    # read in training config
-    with open(
-        os.path.join("config", "drug_induced_gene_expression_prediction.yaml"),
-        "r",
-    ) as file:
-        config = yaml.safe_load(file)
-
+def get_model_weights(expression_dim, num_classes, conditional_dim, config):
     # # Initialize the CVAE model
     model = CVAE(
-        expression_dim=df_train.shape[1],  # Number of genes
-        num_classes=df_meta_train[
-            "moa_int"
-        ].nunique(),  # Number of MOA classes + 1 for "Other"
-        condition_dim=df_meta_train["fingerprint"].iloc[0].shape[0],  # Fingerprint size
+        expression_dim=expression_dim,  # df_train.shape[1],  # Number of genes
+        num_classes=num_classes,  # df_meta_train["moa_int"].nunique(),  # Number of MOA classes + 1 for "Other"
+        condition_dim=conditional_dim,  # df_meta_train["fingerprint"].iloc[0].shape[0],  # Fingerprint size
         hidden_dim=config["hidden_dim"],  # Hidden dimension for the encoder and decoder
         latent_dim=config["latent_dim"],  # Latent space dimension
         num_encoder_layers=config[
@@ -473,87 +451,40 @@ def get_model_weights():
 
     model = model.to(DEVICE)
 
-    return (
-        model,
-        train_loader,
-        val_loader,
-        test_loader,
-        df_train,
-        df_val,
-        df_test,
-        df_meta_train,
-        df_meta_val,
-        df_meta_test,
-        df_gene_mapping,
-        int_to_moa
-    )
+    return model
 
 
-def train_model():
-    # read in training config
-    with open(os.path.join("config", "sweep.yaml"), "r") as file:
-        sweep_config = yaml.safe_load(file)
+def sweep_train_model(sweep_config):
 
     sweep_id = wandb.sweep(
         sweep_config, project="drug_induced_gene_expression_prediction"
     )
     (
-        model,
         train_loader,
         val_loader,
         test_loader,
         df_train,
-        df_val,
-        df_test,
+        _,
+        _,
         df_meta_train,
-        df_meta_val,
+        _,
         df_meta_test,
         df_gene_mapping,
-        int_to_moa
-    ) = get_model_weights()
+        int_to_moa,
+    ) = get_data()
 
     def train_with_sweep():
         with wandb.init() as run:
             config = wandb.config
 
-            model = CVAE(
-                expression_dim=df_train.shape[1],  # Number of genes
-                num_classes=df_meta_train[
-                    "moa_int"
-                ].nunique(),  # Number of MOA classes + 1 for "Other"
-                condition_dim=df_meta_train["fingerprint"]
-                .iloc[0]
-                .shape[0],  # Fingerprint size
-                hidden_dim=config[
-                    "hidden_dim"
-                ],  # Hidden dimension for the encoder and decoder
-                latent_dim=config["latent_dim"],  # Latent space dimension
-                num_encoder_layers=config[
-                    "num_encoder_layers"
-                ],  # Number of layers in the encoder
-                encoder_dropout_rate=config[
-                    "encoder_dropout"
-                ],  # Dropout rate for the encoder
-                num_decoder_layers=config[
-                    "num_decoder_layers"
-                ],  # Number of layers in the decoder
-                condition_emb_dim=config[
-                    "condition_emb_dim"
-                ],  # Embedding dimension for the condition (fingerprint)
-                decoder_dropout_rate=config[
-                    "decoder_dropout"
-                ],  # Dropout rate for the decoder
-                num_molecular_emb_layers=config[
-                    "num_molecular_emb_layers"
-                ],  # Number of layers in the molecular embedding
+            model = get_model_weights(
+                expression_dim=df_train.shape[1],
+                num_classes=df_meta_train["moa_int"].nunique(),
+                conditional_dim=df_meta_train["fingerprint"].iloc[0].shape[0],
+                config=config,
             )
-            model = model.to(DEVICE)
 
-            num_epochs = config["num_epochs"]
-            alpha = config["alpha"]  # Reconstruction loss weight
-            gamma = config["gamma"]  # Classification loss weight
-            beta = config["beta"]  # KL divergence weight
-
+            # Set up directories for saving images and animations
             sweep_name = run.sweep_id
             run_name = run.name
             run_id = run.name.split("-")[-1]
@@ -562,15 +493,19 @@ def train_model():
                 "data", "hyperparameter_runs", sweep_name, img_save_dir
             )
             animation_save_path = os.path.join(
-                "data", "hyperparameter_runs", sweep_name, img_save_dir, "animation_frames"
+                "data",
+                "hyperparameter_runs",
+                sweep_name,
+                img_save_dir,
+                "animation_frames",
             )
-
             os.makedirs(animation_save_path, exist_ok=True)
             os.makedirs(img_save_path, exist_ok=True)
-            # optimizer = torch.optim.Adam(
-            #     model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
-            # )
-            optimizer = bnb.Adam8bit(model.parameters(), lr=config["learning_rate"], weight_decay=1e-5)
+            
+            # Initialize BnB
+            optimizer = bnb.Adam8bit(
+                model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+            )
             history = {
                 k: []
                 for k in [
@@ -674,9 +609,7 @@ def train_model():
             frame_files = create_animation_frames(
                 animation_data, animation_save_path, df_meta_test
             )
-            animation_path = os.path.join(
-                animation_save_path, "training_animation.gif"
-            )
+            animation_path = os.path.join(animation_save_path, "training_animation.gif")
             build_animation_gif(frame_files, animation_path, duration=0.5)
             wandb.log(
                 {"training_animation": wandb.Video(animation_path, fps=2, format="gif")}
@@ -691,6 +624,169 @@ def train_model():
     wandb.agent(sweep_id, function=train_with_sweep, count=500)
 
 
+def train_model(config):
+
+    (
+        train_loader,
+        val_loader,
+        test_loader,
+        df_train,
+        df_val,
+        df_test,
+        df_meta_train,
+        df_meta_val,
+        df_meta_test,
+        df_gene_mapping,
+        int_to_moa,
+    ) = get_data()
+
+    model = get_model_weights(
+        expression_dim=df_train.shape[1],
+        num_classes=df_meta_train["moa_int"].nunique(),
+        conditional_dim=df_meta_train["fingerprint"].iloc[0].shape[0],
+        config=config,
+    )
+
+    # Set up directories for saving images and animations
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    img_save_dir = f"{now}_{config['latent_dim']}latent_{config['hidden_dim']}hidden_{config['num_encoder_layers']}enclayers_{config['encoder_dropout']:.2f}do_{config['condition_emb_dim']}condembs_{config['learning_rate']:.2f}lr_{config['alpha']:.2f}a_{config['beta']:.2f}b_{config['gamma']:.2f}g_{config['num_molecular_emb_layers']}condlayers_{config['num_decoder_layers']}declayers"
+    img_save_path = os.path.join("data", "model_runs", img_save_dir)
+    animation_save_path = os.path.join(img_save_path, "animation_frames")
+    os.makedirs(animation_save_path, exist_ok=True)
+    os.makedirs(img_save_path, exist_ok=True)
+    
+    wandb.init(
+        project="drug-induced-gene-expression-prediction", config=config, name=img_save_dir
+    )
+    # Initialize BnB
+    optimizer = bnb.Adam8bit(
+        model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+    )
+    
+    history = {
+        k: []
+        for k in [
+            "train_loss",
+            "val_loss",
+            "train_recon",
+            "val_recon",
+            "train_kl",
+            "val_kl",
+            "train_class_loss",
+            "val_class_loss",
+        ]
+    }
+    
+    animation_data = []
+    
+    # Main Training Loop
+    pbar_epochs = tqdm(range(1, config["num_epochs"] + 1), desc="Overall Progress")
+    for epoch in pbar_epochs:
+        beta = (
+            config["beta"]
+            * ((epoch - 1) / config["num_epochs"])
+            if config.get("beta_anneal")
+            else config["beta"]
+        )
+        train_metrics = train_epoch(
+            model, train_loader, optimizer, config, beta, DEVICE
+        )
+        val_metrics = evaluate_epoch(model, val_loader, config, beta, DEVICE)
+        for key in train_metrics:
+            history[f"train_{key}"].append(train_metrics[key])
+            history[f"val_{key}"].append(val_metrics[key])
+
+        wandb.log(
+            {
+                "Train Loss": train_metrics["loss"],
+                "Val Loss": val_metrics["loss"],
+                "Train Recon": train_metrics["recon"],
+                "Val Recon": val_metrics["recon"],
+                "Train KL": train_metrics["kl"],
+                "Val KL": val_metrics["kl"],
+                "Train Class Loss": train_metrics["class_loss"],
+                "Val Class Loss": val_metrics["class_loss"],
+                "Beta": beta,
+                "Epoch": epoch,
+            },
+            step=epoch,
+        )
+
+        # Generate and store data for animation
+        test_embeddings, test_labels, _ = generate_embeddings(
+            model=model,
+            dataset=test_loader.dataset,
+            df_meta_data=df_meta_test,
+            device=DEVICE,
+            int_to_moa=int_to_moa,
+            batch_size=test_loader.batch_size,
+        )
+        animation_data.append(
+            {
+                "embeddings": test_embeddings,
+                "labels": test_labels,
+                "pert_labels": df_meta_test["pert_id"].tolist(),
+            }
+        )
+        pbar_epochs.set_postfix(
+            {
+                "Train Loss": f"{train_metrics['loss']:.4f}",
+                "Val Loss": f"{val_metrics['loss']:.4f}",
+            }
+        )
+
+    evaluate_recon_and_gen_gsea_for_pert(
+        pert_id_to_test="BRD-A00993607",
+        val_dataset=val_loader.dataset,
+        df_gene_mapping=df_gene_mapping,
+        img_save_path=img_save_path,
+        model=model,
+        device=DEVICE,
+    )
+
+    get_recon_correlation(
+        model, train_loader, val_loader, img_save_path, device=DEVICE
+    )
+    
+    # Create and Log Animation
+    frame_files = create_animation_frames(
+        animation_data, animation_save_path, df_meta_test
+    )
+    animation_path = os.path.join(animation_save_path, "training_animation.gif")
+    build_animation_gif(frame_files, animation_path, duration=0.5)
+    wandb.log(
+        {"training_animation": wandb.Video(animation_path, fps=2, format="gif")}
+    )
+    plot_training_history(history)
+    plt.savefig(os.path.join(img_save_path, "training_history.png"))
+
+    wandb.finish()
+
+
 if __name__ == "__main__":
-    # Initialize the model and start training
-    train_model()
+
+    parser = argparse.ArgumentParser(description="Train a CVAE model for drug-induced gene expression prediction.")
+    parser.add_argument(
+        "--mode", 
+        type=str, 
+        choices=["sweep", "train"],
+        default="train",
+        help="Mode to run: 'sweep' for hyperparameter sweep, 'train' for training a single model."
+    )
+    args = parser.parse_args()
+    if args.mode == "sweep":
+        # Start hyperparameter sweep
+        with open(
+            os.path.join("config", "drug_induced_gene_expression_prediction", "sweep_parameters.yaml"),
+            "r",
+        ) as file:
+            config = yaml.safe_load(file)
+        sweep_train_model(config)
+    else:
+        # Train a single model
+        with open(
+            os.path.join("config", "drug_induced_gene_expression_prediction", "model_parameters.yaml"),
+            "r",
+        ) as file:
+            config = yaml.safe_load(file)
+        train_model(config)
