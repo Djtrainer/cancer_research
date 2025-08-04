@@ -1,11 +1,11 @@
 # Configuration for the CVAE model training on drug-induced gene expression prediction
 hidden_dim: 256
-num_encoder_layers: 1
+num_encoder_layers: 0
 encoder_dropout: 0.10625875377980644
 
 latent_dim: 32
 
-num_decoder_layers: 4
+num_decoder_layers: 0
 decoder_dropout: 0.09832017144897244
 
 condition_emb_dim: 128
@@ -16,6 +16,6 @@ beta: 0.03850661305541152
 beta_anneal: True  # Enable beta annealing
 gamma: 3.7412559716455545
 
-num_epochs: 50
+num_epochs: 2
 learning_rate: 0.00020184856825726071
 model_save_dir: "models/drug_induced_gene_expression_prediction"
