@@ -148,7 +148,6 @@ def _run_epoch(
 def create_animation_frames(
     epoch_history: list[dict],
     animation_dir: str,
-    df_meta_test: pd.DataFrame,
 ) -> list[str]:
     """
     Creates PCA plots for each epoch and saves them as image frames for animation.
@@ -166,7 +165,6 @@ def create_animation_frames(
     pca = PCA(n_components=2, random_state=42)
     pca.fit(final_embeddings)
 
-    frame_files: list[str] = []
     all_embeddings: list[np.ndarray] = []
     for epoch_data in epoch_history:
         # Use the SAME fitted PCA to transform embeddings from every epoch
@@ -177,99 +175,39 @@ def create_animation_frames(
     x_lim = (stacked_embeddings[:, 0].min() - 1, stacked_embeddings[:, 0].max() + 1)
     y_lim = (stacked_embeddings[:, 1].min() - 1, stacked_embeddings[:, 1].max() + 1)
 
-    labels_for_legend = epoch_history[0]["pert_labels"]
-    unique_labels = np.unique(labels_for_legend)
-    cmap = plt.get_cmap("tab20")
-    colors = [cmap(i) for i in np.linspace(0, 1, len(unique_labels))]
-
-    legend_elements_pert = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label=f"Class {label}",
-            markerfacecolor=color,
-            markersize=8,
-            linewidth=0,
-            alpha=0.7,
-        )
-        for label, color in zip(unique_labels, colors)
-    ]
-
     labels_for_legend = epoch_history[0]["labels"]
-    unique_labels = np.unique(labels_for_legend)
-    cmap = plt.get_cmap("tab10")
-    colors = [cmap(i) for i in np.linspace(0, 1, len(unique_labels))]
 
-    legend_elements_ids = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label=f"Class {label}",
-            markerfacecolor=color,
-            markersize=8,
-            linewidth=0,
-            alpha=0.7,
-        )
-        for label, color in zip(unique_labels, colors)
-    ]
+    le = LabelEncoder()
+    label_ids = le.fit_transform(labels_for_legend)
 
+    frame_files: list[str] = []
     for i, epoch_data in enumerate(epoch_history):
         epoch_num = i + 1
 
-        fig, ax = plt.subplots(1, 2, figsize=(10, 8), sharex=True, sharey=True)
-
-        sns.scatterplot(
-            x=all_embeddings[i][:, 0],
-            y=all_embeddings[i][:, 1],
-            hue=df_meta_test["pert_id"].tolist(),
-            palette="tab20",
-            s=40,
+        fig, axes = plt.subplots(figsize=(10, 10))
+        scatter = axes.scatter(
+            all_embeddings[i][:, 0], 
+            all_embeddings[i][:, 1], 
+            c=label_ids, 
             alpha=0.5,
-            ax=ax[0],
+            cmap="tab10", 
+            s=40
         )
-        ax[0].set_title(f"Latent Space PCA - Epoch {epoch_num}")
-        ax[0].set_xlabel("PCA Component 1")
-        ax[0].set_ylabel("PCA Component 2")
-        ax[0].set_xlim(x_lim)
-        ax[0].set_ylim(y_lim)
+        handles, _ = scatter.legend_elements()
+        axes.legend(
+            handles=handles,
+            labels=list(le.classes_),
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left",
+        )
+        axes.grid(False)
+        axes.set_title(f"Latent Space PCA - Epoch {epoch_num}")
+        axes.set_xlabel("PCA Component 1")
+        axes.set_ylabel("PCA Component 2")
+        axes.set_xlim(x_lim)
+        axes.set_ylim(y_lim)
 
-        # Add legend
-        ax[0].legend(
-            handles=legend_elements_pert,
-            title="Classes",
-            fontsize=12,
-            loc="center left",
-            bbox_to_anchor=(1.02, 0.5),
-        )
-        ax[0].set_aspect("equal", adjustable="box")
-
-        sns.scatterplot(
-            x=all_embeddings[i][:, 0],
-            y=all_embeddings[i][:, 1],
-            hue=df_meta_test["pert_id"].tolist(),
-            palette="tab10",
-            s=40,
-            alpha=0.5,
-            ax=ax[1],
-        )
-        ax[1].set_title(f"Latent Space PCA - Epoch {epoch_num}")
-        ax[1].set_xlabel("PCA Component 1")
-        ax[1].set_ylabel("PCA Component 2")
-        ax[1].set_xlim(x_lim)
-
-        # Add legend
-        ax[1].legend(
-            handles=legend_elements_ids,
-            title="Classes",
-            fontsize=12,
-            loc="center left",
-            bbox_to_anchor=(1.02, 0.5),
-        )
-        ax[1].set_aspect("equal", adjustable="box")
+        axes.set_aspect("equal", adjustable="box")
 
         # Save the frame
         frame_path = os.path.join(animation_dir, f"epoch_{epoch_num:03d}.png")
@@ -299,116 +237,33 @@ def build_animation_gif(
             writer.append_data(image)
 
 
-def plot_pca(
-    embeddings: np.ndarray,
-    labels: pd.Series,
-    title: str = "PCA Plot",
-    axes: Optional[plt.Axes] = None,
-) -> plt.Axes:
-    """
-    Plots a 2D PCA projection of the given embeddings, colored by the provided labels.
-    Args:
-        embeddings (np.ndarray): Array of shape (n_samples, n_features) containing the data to project.
-        labels (pd.Series): Series of categorical labels for each sample, used for coloring points.
-        title (str, optional): Title for the plot. Defaults to "PCA Plot".
-        axes (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure and axes are created.
-    Returns:
-        plt.Axes: The matplotlib Axes object containing the PCA plot.
-    """
-
-    scaler = StandardScaler()
-    embeddings = scaler.fit_transform(embeddings)
-
-    if axes is None:
-        _, axes = plt.subplots(figsize=(8, 6))
-
-    # Encode labels for coloring
-    le = LabelEncoder()
-    label_ids = le.fit_transform(labels)
-
-    pca_model = PCA(n_components=2, random_state=42)
-    embedding = pca_model.fit_transform(embeddings)
-    # Plot
-    scatter = axes.scatter(
-        embedding[:, 0], embedding[:, 1], c=label_ids, cmap="tab10", s=40
-    )
-    axes.set_title(title)
-    # Fix legend for UMAP plot with multiple classes
-    handles, _ = scatter.legend_elements()
-    axes.legend(
-        handles=handles,
-        labels=list(le.classes_),
-        bbox_to_anchor=(1.05, 1),
-        loc="upper left",
-    )
-    plt.tight_layout()
-
-    return axes
-
-
 def generate_embeddings(
-    model: torch.nn.Module,
-    dataset: Any,
-    df_meta_data: pd.DataFrame,
-    device: torch.device,
-    int_to_moa: Dict[int, str],
-    batch_size: int,
-) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    model: nn.Module, loader: DataLoader, device: torch.device
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generates embeddings and corresponding labels from a given model and dataset.
-
-    Args:
-        model (torch.nn.Module): The trained model used to generate embeddings.
-        dataset (Any): Dataset object containing gene expression data.
-        df_meta_data (pd.DataFrame): DataFrame containing metadata for each sample, including fingerprints and MOA labels.
-        device (torch.device): Device to perform computation on (e.g., 'cpu' or 'cuda').
-        int_to_moa (Dict[int, str]): Mapping from integer MOA labels to their string representations.
-        batch_size (int): Number of samples per batch for processing.
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray, List[str]]:
-            - all_embeddings: Array of embeddings for all samples.
-            - all_labels: Array of integer MOA labels for all samples.
-            - all_moa_labels: List of string MOA labels for all samples.
+    Generate latent embeddings (mu) and labels for a given dataset using a DataLoader.
     """
     model.eval()
     all_embeddings = []
     all_labels = []
 
     with torch.no_grad():
-        # for condition, expression, moa_label in loader:
-        meta_batches = [
-            df_meta_data.iloc[i : i + batch_size]
-            for i in range(0, len(df_meta_data), batch_size)
-        ]
-        expression_batches = [
-            dataset.df_expression.iloc[i : i + batch_size]
-            for i in range(0, len(dataset.df_expression), batch_size)
-        ]
+        for condition, expression, moa_label in loader:
+            # Note: We only need expression and condition for the model input
+            expression, condition = expression.to(device), condition.to(device)
 
-        for meta_batch, expression_batch in zip(meta_batches, expression_batches):
-            conditions = torch.tensor(np.stack(meta_batch["fingerprint"].values)).to(
-                device
-            )
-            # moa_labels = torch.tensor(meta_batch["pert_id"].values).to(device)
-            moa_labels = torch.tensor(meta_batch["moa_int"].values).to(device)
-            expressions = torch.tensor(expression_batch.values).to(device)
-
-            # Forward pass
-            _, mu, _ = model(expressions, conditions)
+            # Forward pass to get the mean of the latent space
+            _, mu, _ = model(expression, condition)
 
             all_embeddings.append(mu.cpu().numpy())
-            all_labels.append(moa_labels.cpu().numpy())
+            all_labels.append(
+                moa_label.numpy()
+            )  
 
-    # Concatenate all batches
     all_embeddings = np.concatenate(all_embeddings, axis=0)
     all_labels = np.concatenate(all_labels, axis=0)
-    all_moa_labels = [int_to_moa[label] for label in all_labels]
-    return (
-        all_embeddings,
-        all_labels,
-        all_moa_labels,
-    )
+
+    return all_embeddings, all_labels
 
 
 def get_data() -> Tuple:
@@ -639,18 +494,16 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> Non
         )
 
         # Generate and store data for animation
-        test_embeddings, test_labels, _ = generate_embeddings(
+        test_embeddings, all_moa_labels = generate_embeddings(
             model=model,
-            dataset=test_loader.dataset,
-            df_meta_data=df_meta_test,
+            loader=test_loader,
             device=DEVICE,
-            int_to_moa=int_to_moa,
-            batch_size=test_loader.batch_size,
         )
+        moa_labels = [int_to_moa[int_label] for int_label in all_moa_labels.tolist()]
         animation_data.append(
             {
                 "embeddings": test_embeddings,
-                "labels": test_labels,
+                "labels": moa_labels,
                 "pert_labels": df_meta_test["pert_id"].tolist(),
             }
         )
@@ -661,26 +514,14 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> Non
             }
         )
 
-    gsea_gen_error_list, gsea_recon_error_list = [], []
-    for pert_id, drug_name in [
-        ("BRD-A00993607", "Bortezomib"),
-        ("BRD-K01800709", "Trichostatin A"),
-        ("BRD-K29699988", "Erlotinib"),
-    ]:
-        recon_error, gen_error = evaluate_recon_and_gen_gsea_for_pert(
-            pert_id_to_test=pert_id,
-            drug_name=drug_name,
-            val_dataset=val_loader.dataset,
-            df_gene_mapping=df_gene_mapping,
-            img_save_path=img_save_path,
-            model=model,
-            device=DEVICE,
-        )
-        gsea_gen_error_list.append(gen_error)
-        gsea_recon_error_list.append(recon_error)
-
-    gsea_recon_error = np.mean(gsea_recon_error_list)
-    gsea_gen_error = np.mean(gsea_gen_error_list)
+    gsea_recon_error, gsea_gen_error = evaluate_recon_and_gen_gsea_for_pert(
+        pert_id_to_test="BRD-A00993607",
+        val_dataset=val_loader.dataset,
+        df_gene_mapping=df_gene_mapping,
+        img_save_path=img_save_path,
+        model=model,
+        device=DEVICE,
+    )
 
     train_corr, val_corr = get_recon_correlation(
         model, train_loader, val_loader, img_save_path, device=DEVICE
@@ -700,7 +541,7 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> Non
     )
     # Create and Log Animation
     frame_files = create_animation_frames(
-        animation_data, animation_save_path, df_meta_test
+        animation_data, animation_save_path
     )
     animation_path = os.path.join(animation_save_path, "training_animation.gif")
     build_animation_gif(frame_files, animation_path, duration=0.5)
@@ -710,6 +551,8 @@ def run_training_pipeline(config: Dict[str, Any], is_sweep: bool = False) -> Non
 
     if is_sweep:
         wandb.finish()
+
+    return model
 
 
 if __name__ == "__main__":
