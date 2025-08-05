@@ -12,7 +12,7 @@ from drug_induced_gene_expression_prediction import run_training_pipeline
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 PROCESSED_DATA_PATH = os.path.join(
-    "..", "..", "data", "processed", "drug_induced_gene_expression_prediction"
+    "data", "processed", "drug_induced_gene_expression_prediction"
 )
 
 BATCH_SIZE = 64

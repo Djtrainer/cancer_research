@@ -616,9 +616,9 @@ def run_training_pipeline(
     
     gsea_gen_error_list, gsea_recon_error_list = [], []
     for (pert_id, drug_name) in [
-        ("BRD-A00993607", "Bortezomib"),
-        ("BRD-K01800709", "Trichostatin A"),
-        ("BRD-K29699988", "Erlotinib")
+        ("BRD-K97764662", "Panobinostat"),
+        ("BRD-A19037878", "Geldanamycin"),
+        ("BRD-K49049886", "Lapatinib")
         ]:
         gsea_recon_error_item, gsea_gen_error_item = evaluate_recon_and_gen_gsea_for_pert(
             pert_id_to_test=pert_id,
