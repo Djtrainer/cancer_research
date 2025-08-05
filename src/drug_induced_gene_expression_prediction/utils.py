@@ -505,7 +505,7 @@ def training_loop(
     pbar_epochs = tqdm(range(1, config["num_epochs"] + 1), desc="Overall Progress")
     for epoch in pbar_epochs:
         beta = (
-            config["beta"] * ((epoch - 1) / config["num_epochs"])
+            config["beta"] * (epoch / config["num_epochs"])
             if config.get("beta_anneal")
             else config["beta"]
         )

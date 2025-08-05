@@ -6,16 +6,16 @@ encoder_dropout: 0.3
 latent_dim: 16
 
 num_decoder_layers: 3
-decoder_dropout: 0.24
+decoder_dropout: 0.3
 
 condition_emb_dim: 256
 num_molecular_emb_layers: 0
 
-alpha: 237
+alpha: 1
 beta: 0.01
-beta_anneal: False  # Enable beta annealing
+beta_anneal: True  # Enable beta annealing
 gamma: 0.13
 
-num_epochs: 20
+num_epochs: 50
 learning_rate: 0.00025
 model_save_dir: "models/drug_induced_gene_expression_prediction"
