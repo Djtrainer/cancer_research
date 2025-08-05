@@ -3,19 +3,19 @@ hidden_dim: 32
 num_encoder_layers: 3
 encoder_dropout: 0.3
 
-latent_dim: 128
+latent_dim: 16
 
 num_decoder_layers: 3
-decoder_dropout: 0.3
+decoder_dropout: 0.24
 
-condition_emb_dim: 128
-num_molecular_emb_layers: 10
+condition_emb_dim: 256
+num_molecular_emb_layers: 0
 
-alpha: 10
-beta: 1
+alpha: 237
+beta: 0.01
 beta_anneal: False  # Enable beta annealing
-gamma: 3
+gamma: 0.13
 
 num_epochs: 20
-learning_rate: 0.0001
+learning_rate: 0.00025
 model_save_dir: "models/drug_induced_gene_expression_prediction"

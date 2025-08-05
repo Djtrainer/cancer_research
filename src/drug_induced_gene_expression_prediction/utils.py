@@ -163,14 +163,15 @@ def _run_epoch(
             moa_prediction = model.classify(mu)
 
             loss, recon, kl = vae_loss_function(
-                recon_x,
-                expression,
-                mu,
-                log_var,
-                model.latent_dim,
-                beta,
-                recon_weight=config["alpha"],
+                recon_x = recon_x,
+                x = expression,
+                mu = mu,
+                log_var = log_var,
+                latent_dim = model.latent_dim,
+                beta = beta,
+                recon_weight = config["alpha"],
             )
+            # print(f"BETA: {beta}, LOSS: {loss:.4f}, RECON_LOSS: {recon:.4f}, KL_LOSS: {kl:.4f}, LOG VAR: {torch.mean(log_var):.4f}, MU: {torch.mean(mu):.4f}")
             mask = moa_label != -1
             class_loss = torch.tensor(0.0, device=device)
             if mask.sum() > 0:
@@ -508,7 +509,7 @@ def training_loop(
             if config.get("beta_anneal")
             else config["beta"]
         )
-
+        # print(f"BETA: {beta}")
         train_metrics = _run_epoch(
             model, train_loader, config, beta, device, optimizer=optimizer
         )

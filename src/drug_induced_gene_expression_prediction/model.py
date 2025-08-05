@@ -63,6 +63,9 @@ class Encoder(torch.nn.Module):
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
 
+        # Clamp logvar to a reasonable range to prevent numerical overflow/underflow.
+        logvar = torch.clamp(logvar, min=-20, max=20)
+
         return mu, logvar
 
 
