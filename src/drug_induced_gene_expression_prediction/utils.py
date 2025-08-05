@@ -479,11 +479,11 @@ def training_loop(
     if torch.cuda.is_available():
         # Initialize BnB
         optimizer = bnb.Adam8bit(
-            model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+            model.parameters(), lr=config["learning_rate"], weight_decay=float(config["weight_decay"])
         )
     else:
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=config["learning_rate"], weight_decay=1e-5
+            model.parameters(), lr=config["learning_rate"], weight_decay=float(config["weight_decay"])
         )
 
     history = {
