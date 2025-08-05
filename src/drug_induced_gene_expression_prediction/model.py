@@ -29,19 +29,19 @@ class Encoder(torch.nn.Module):
         """
         super(Encoder, self).__init__()
 
-        self.fc_initial = nn.Linear(input_dim, hidden_dim * (num_layers + 1))
+        self.fc_initial = nn.Linear(input_dim, hidden_dim * 4 * (num_layers + 1)**3)
 
         self.fc_layers = nn.ModuleList()
         if num_layers > 0:
             for layer_mult in range(1, num_layers + 1)[::-1]:
                 self.fc_layers.append(
-                    nn.Linear(hidden_dim * (layer_mult + 1), hidden_dim * layer_mult)
+                    nn.Linear(hidden_dim * (layer_mult + 1)**3 * 4, hidden_dim * layer_mult**3 * 4)
                 )
 
         self.dropout = nn.Dropout(p=dropout_rate)
 
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+        self.fc_mu = nn.Linear(hidden_dim * 4, latent_dim)
+        self.fc_logvar = nn.Linear(hidden_dim * 4, latent_dim)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -92,7 +92,7 @@ class Decoder(torch.nn.Module):
 
         self.dropout = nn.Dropout(p=dropout_rate)
 
-        self.fc_initial = nn.Linear(input_dim, hidden_dim * 8)
+        self.fc_initial = nn.Linear(input_dim, hidden_dim * 4)
 
         self.fc_layers = nn.ModuleList()
         if num_layers > 0:
@@ -100,16 +100,16 @@ class Decoder(torch.nn.Module):
                 self.fc_layers.append(
                     nn.Sequential(
                         nn.Linear(
-                            hidden_dim * layer_mult * 8,
-                            hidden_dim * (layer_mult + 1) * 8,
+                            hidden_dim * layer_mult**3 * 4,
+                            hidden_dim * (layer_mult + 1)**3 * 4,
                         ),
-                        nn.BatchNorm1d(hidden_dim * (layer_mult + 1) * 8),
+                        nn.BatchNorm1d(hidden_dim * (layer_mult + 1)**3 * 4),
                         nn.ReLU(),
                         nn.Dropout(p=dropout_rate),
                     )
                 )
 
-        self.fc_final = nn.Linear(hidden_dim * (num_layers + 1) * 8, output_dim)
+        self.fc_final = nn.Linear(hidden_dim * (num_layers + 1)**3 * 4, output_dim)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """
