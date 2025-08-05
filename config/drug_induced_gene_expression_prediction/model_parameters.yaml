@@ -3,7 +3,7 @@ hidden_dim: 32
 num_encoder_layers: 3
 encoder_dropout: 0.3
 
-latent_dim: 16
+latent_dim: 32
 
 num_decoder_layers: 3
 decoder_dropout: 0.3
