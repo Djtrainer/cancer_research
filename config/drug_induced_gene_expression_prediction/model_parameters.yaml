@@ -13,9 +13,9 @@ num_molecular_emb_layers: 0
 
 alpha: 1
 beta: 0.01
-beta_anneal: True  # Enable beta annealing
+beta_anneal: False  # Enable beta annealing
 gamma: 0.13
 
-num_epochs: 50
+num_epochs: 20
 learning_rate: 0.00025
 model_save_dir: "models/drug_induced_gene_expression_prediction"
