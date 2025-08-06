@@ -7,7 +7,6 @@ import torch
 from torch.utils.data import Dataset
 
 
-
 class LincsDataset(Dataset):
     """Dataset for LINCS drug-induced gene expression prediction."""
 
