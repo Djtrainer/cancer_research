@@ -31,10 +31,7 @@ def get_control_and_test_profiles(
 
     all_gene_names = control_profile.index.tolist()
     all_gene_names = (
-        df_gene_mapping
-        .loc[control_profile.index.astype(int)]
-        .values.squeeze()
-        .tolist()
+        df_gene_mapping.loc[control_profile.index.astype(int)].values.squeeze().tolist()
     )
     control_x = control_profile.values
 
@@ -101,7 +98,13 @@ def get_gsea_prerank(recon_x, control_np, all_gene_names):
 
 
 def evaluate_recon_and_gen_gsea_for_pert(
-    pert_id_to_test, drug_name, val_dataset, df_gene_mapping, img_save_path, model, device
+    pert_id_to_test,
+    drug_name,
+    val_dataset,
+    df_gene_mapping,
+    model,
+    device,
+    img_save_path=None,
 ):
     expression_x, condition_x, recon_x, control_x, all_gene_names = (
         get_control_and_test_profiles(
@@ -172,7 +175,8 @@ def evaluate_recon_and_gen_gsea_for_pert(
     ax.set_ylabel("")
     plt.legend(title="Profile Source")
 
-    plt.savefig(os.path.join(img_save_path, f"gsea_comparison_{drug_name}.png"))
+    if img_save_path is not None:
+        plt.savefig(os.path.join(img_save_path, f"gsea_comparison_{drug_name}.png"))
 
     return gsea_recon_error, gsea_gen_error
 
@@ -185,7 +189,7 @@ def get_recon_correlation(model, train_loader, val_loader, img_save_path, device
     for condition, expression, moa_label in train_loader:
         condition = condition.to(device)
         expression = expression.to(device)
-        
+
         recon_x, mu, log_var = model(expression, condition)
         train_reconstruction.append(recon_x.detach().cpu().numpy())
         train_expression.append(expression.detach().cpu().numpy())
