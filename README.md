@@ -6,10 +6,11 @@ This repository serves as a collection of data science projects exploring comple
 
 * [About This Repository](#about-this-repository)
 * [Projects](#projects)
-    * [1. Exploratory Data Analysis (EDA) of Gene Expression Data](#exploratory-data-analysis-(eda)-of-gene-expression-data)
-    * [2. Prognostic Gene Signature in Breast Cancer](#project-1-prognostic-gene-signature-in-breast-cancer)
-    * [3. Graph Neural Network to Identify Tumor Cell Neighborhoods (Spatial Transcriptiomics)](#craph-neural-network-to-identify-tumor-cell-neighborhoods-(spatial-transcriptiomics))
-    * [4. Generative AI Model (VAE) to Predict Gene Expression from Drug SMILES](generative-ai-model-(vae)-to-predictgene-expression-from-drug-smiles)
+    * [1. Graph Neural Network to Identify Tumor Cell Neighborhoods (Spatial Transcriptiomics)](#craph-neural-network-to-identify-tumor-cell-neighborhoods-(spatial-transcriptiomics))
+    * [2. Generative AI Model (VAE) to Predict Gene Expression from Drug SMILES](generative-ai-model-(vae)-to-predictgene-expression-from-drug-smiles)
+    * [3. Exploratory Data Analysis (EDA) of Gene Expression Data](#exploratory-data-analysis-(eda)-of-gene-expression-data)
+    * [4. Prognostic Gene Signature in Breast Cancer](#project-1-prognostic-gene-signature-in-breast-cancer)
+
 * [Setup & Installation](#setup--installation)
 
 
@@ -47,26 +48,56 @@ This repository is designed for data scientists, bioinformaticians, and research
 
 --- 
 
-###  2. Generative Modeling of Drug-Induced Gene Expression (Part I)
-* Notebook: `notebooks/drug_induced_gene_expression_prediction.ipynb`
+###  2. Generative AI Model (VAE) to Predict Gene Expression from Drug SMILES 
 
-* **Description**: This project develops a semi-supervised Conditional Variational Autoencoder (CVAE) to model the relationship between a drug's chemical structure and its effect on the human transcriptome. Using LINCS L1000 data, the model learns a compressed latent space that represents the biological state of cells. A classification head, trained on Mechanism of Action (MoA) labels, is used to regularize this space, with the ultimate goal of generating biologically feasible gene expression profiles for novel compounds from their chemical fingerprints alone.
+ This project develops a semi-supervised Conditional Variational Autoencoder (CVAE) to model the relationship between a drug's chemical structure and its effect on the human transcriptome. Using LINCS L1000 data, the model learns a compressed latent space that represents the biological state of cells. A classification head, trained on Mechanism of Action (MoA) labels, is used to regularize this space, with the ultimate goal of generating biologically feasible gene expression profiles for novel compounds from their chemical fingerprints alone.
+
+  This project is broken up into two different notebooks.
+
+### Part I: Exploratory Data Analysis & Feature Engineering
+---
+* **Description**: The first notebook serves as the foundation for the entire project. Its primary role is to ingest, define, and explore the vast and complex LINCS dataset, culminating in the creation of clean, analysis-ready files for the subsequent modeling phase.
+
+* Notebook: `notebooks/drug_induced_gene_expression_prediction/part_i_data_analysis.ipynb`
 
 * **Core Topics:**
 
-  * Generative Modeling with Variational Autoencoders (CVAEs)
-  * Semi-Supervised Learning
-  * Cheminformatics and Molecular Fingerprints
-  * Computational Biology and Transcriptomics
+  * Large-Scale Biological Data Ingestion and Wrangling
+  * Exploratory Data Analysis (EDA) of Transcriptomic Data
+  * Cheminformatics and Molecular Fingerprinting with RDKit
+  * Feature Engineering for Drug Response Modeling
+
+### Part II: Modeling & Validation
+---
+* **Description**: This notebook builds directly on the preprocessed data from Part I. Here, we focus exclusively on implementing, training, and rigorously evaluating the CVAE. The primary objective is to move beyond statistical performance and assess the model's ability to learn biologically meaningful representations
+
+* Notebook: `notebooks/drug_induced_gene_expression_prediction/part_ii_modeling.ipynb`
+
+* **Core Topics:**
+
+  * Deep Generative Modeling with Variational Autoencoders (VAEs)
+  * Semi-Supervised Learning for Latent Space Regularization
+  * Model Training and Hyperparameter Optimization in PyTorch
+  * Latent Space Analysis and Interpretation with PCA
+  * Computational Biology and Pathway Validation using GSEA
 
 * **Key Findings:**
+  * **Meaningful Latent Space Organization**: The trained CVAE successfully learned to structure its latent space according to the drugs' mechanisms of action. 
 
-  * **Data Pipeline Established**: The LINCS L1000 gene expression data and corresponding chemical fingerprints have been successfully processed, normalized, and integrated into a custom PyTorch Dataset for model training.
+  * **Biologically Plausible Generation**: The model demonstrated its ability to generate high-fidelity gene expression profiles that are consistent with known biology, validated through GSEA analysis. 
 
-  * **Semi-Supervised CVAE Implemented**: A robust CVAE architecture has been implemented, featuring dedicated modules for encoding, decoding, and processing conditional information. The model is enhanced with a classification head to leverage Mechanism of Action (MoA) labels, guiding the model to learn a more biologically structured latent space.
+  * **Stable and Well-Regularized Training**: The model achieved a stable training process, with validation loss tracking closely with training loss, indicating good generalization. 
 
-  * **Stable Training Achieved**: After iterative debugging of numerical instabilities, a stable training loop has been achieved. The model's loss curves demonstrate successful learning and convergence without significant overfitting or gradient explosion issues, providing a solid baseline for further analysis and optimization.
-
+  <table>
+    <tr>
+      <td align="center"><strong>PCA of Latent Space Evolution</strong></td>
+      <td align="center"><strong>GSEA Validation for Geldanamycin</strong></td>
+    </tr>
+    <tr>
+      <td><img src="imgs/drug_induced_gene_expression_prediction/training_animation.gif" alt="Training PCA Animation" width="450"></td>
+      <td><img src="imgs/drug_induced_gene_expression_prediction/gsea_comparison_Geldanamycin.png" alt="GSEA plot" width="450"></td>
+    </tr>
+  </table>
 ---
 
 ### 3. Exploratory Data Analysis (EDA) of Gene Expression Data
