@@ -1,12 +1,10 @@
 import os
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-import pandas as pd
-import numpy as np
 import gseapy
-
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 import torch
 
 
@@ -43,7 +41,24 @@ def get_control_and_test_profiles(
     return expression_x, condition_x, recon_x, control_x, all_gene_names
 
 
-def get_monte_carlo_generation(condition_x, model, device, num_samples=1000):
+def get_monte_carlo_generation(
+    condition_x: torch.Tensor,
+    model: torch.nn.Module,
+    device: torch.device,
+    num_samples: int = 1000,
+) -> torch.Tensor:
+    """
+    Generate gene expression profiles using Monte Carlo sampling from the model's latent space.
+
+    Args:
+        condition_x (torch.Tensor): Condition tensor for molecular embedding.
+        model (torch.nn.Module): The trained model with decoder and molecular_embedding.
+        device (torch.device): Device to run the computation on.
+        num_samples (int, optional): Number of Monte Carlo samples to generate. Defaults to 1000.
+
+    Returns:
+        torch.Tensor: Mean generated gene expression profile across all samples.
+    """
     all_generated_profiles = []
     for i in range(num_samples):
         torch.manual_seed(i)
@@ -80,8 +95,20 @@ def calculate_log2_fold_change_from_control(recon_x, control_np, all_gene_names)
     return ranked_gene_df.sort_values(by="log2fc", ascending=False)
 
 
-def get_gsea_prerank(recon_x, control_np, all_gene_names):
-    """Get the GSEA prerank DataFrame."""
+def get_gsea_prerank(
+    recon_x: torch.Tensor, control_np: np.ndarray, all_gene_names: list[str]
+) -> pd.DataFrame:
+    """
+    Perform GSEA prerank analysis using reconstructed gene expression and control profile.
+
+    Args:
+        recon_x (torch.Tensor): The reconstructed gene expression profile.
+        control_np (np.ndarray): The control gene expression profile.
+        all_gene_names (list[str]): List of gene names corresponding to the expression profiles.
+
+    Returns:
+        pd.DataFrame: DataFrame containing significant GSEA results (FDR q-val < 0.05).
+    """
     ranked_gene_df = calculate_log2_fold_change_from_control(
         recon_x, control_np, all_gene_names
     )
@@ -98,14 +125,29 @@ def get_gsea_prerank(recon_x, control_np, all_gene_names):
 
 
 def evaluate_recon_and_gen_gsea_for_pert(
-    pert_id_to_test,
-    drug_name,
+    pert_id_to_test: str,
+    drug_name: str,
     val_dataset,
-    df_gene_mapping,
-    model,
-    device,
-    img_save_path=None,
-):
+    df_gene_mapping: pd.DataFrame,
+    model: torch.nn.Module,
+    device: torch.device,
+    img_save_path: str = None,
+) -> tuple[float, float]:
+    """
+    Evaluate GSEA results for original, reconstructed, and generated gene expression profiles for a given perturbation.
+
+    Args:
+        pert_id_to_test (str): Perturbation ID to test.
+        drug_name (str): Name of the drug for labeling plots.
+        val_dataset: Validation dataset containing gene expression profiles.
+        df_gene_mapping (pd.DataFrame): DataFrame mapping gene IDs to gene names.
+        model (torch.nn.Module): Trained model for reconstruction and generation.
+        device (torch.device): Device to run computations on.
+        img_save_path (str, optional): Path to save the GSEA comparison plot. Defaults to None.
+
+    Returns:
+        tuple[float, float]: GSEA reconstruction error and GSEA generation error.
+    """
     expression_x, condition_x, recon_x, control_x, all_gene_names = (
         get_control_and_test_profiles(
             pert_id_to_test, val_dataset, df_gene_mapping, model, device
@@ -135,14 +177,14 @@ def evaluate_recon_and_gen_gsea_for_pert(
     df_results = df_results.dropna(subset="Original Expression")
     df_results = df_results.fillna(0)
 
-    gsea_recon_error = (
+    gsea_recon_error: float = (
         np.abs(
             df_results["Original Expression"] - df_results["Reconstructed Expression"]
         )
         .sum()
         .tolist()
     )
-    gsea_gen_error = (
+    gsea_gen_error: float = (
         np.abs(df_results["Original Expression"] - df_results["Generated Expression"])
         .sum()
         .tolist()
@@ -181,7 +223,27 @@ def evaluate_recon_and_gen_gsea_for_pert(
     return gsea_recon_error, gsea_gen_error
 
 
-def get_recon_correlation(model, train_loader, val_loader, img_save_path, device):
+def get_recon_correlation(
+    model: torch.nn.Module,
+    train_loader,
+    val_loader,
+    img_save_path: str,
+    device: torch.device,
+) -> tuple[float, float]:
+    """
+    Compute and plot the correlation between reconstructed and original gene expression profiles
+    for both training and validation datasets.
+
+    Args:
+        model (torch.nn.Module): Trained model for reconstruction.
+        train_loader: DataLoader for training data.
+        val_loader: DataLoader for validation data.
+        img_save_path (str): Path to save the residuals plot.
+        device (torch.device): Device to run computations on.
+
+    Returns:
+        tuple[float, float]: Correlation coefficients for training and validation data.
+    """
     train_expression = []
     train_reconstruction = []
     model = model.to(device)

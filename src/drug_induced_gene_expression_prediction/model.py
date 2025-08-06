@@ -29,13 +29,16 @@ class Encoder(torch.nn.Module):
         """
         super(Encoder, self).__init__()
 
-        self.fc_initial = nn.Linear(input_dim, hidden_dim * 4 * (num_layers + 1)**2)
+        self.fc_initial = nn.Linear(input_dim, hidden_dim * 4 * (num_layers + 1) ** 2)
 
         self.fc_layers = nn.ModuleList()
         if num_layers > 0:
             for layer_mult in range(1, num_layers + 1)[::-1]:
                 self.fc_layers.append(
-                    nn.Linear(hidden_dim * (layer_mult + 1)**2 * 4, hidden_dim * layer_mult**2 * 4)
+                    nn.Linear(
+                        hidden_dim * (layer_mult + 1) ** 2 * 4,
+                        hidden_dim * layer_mult**2 * 4,
+                    )
                 )
 
         self.dropout = nn.Dropout(p=dropout_rate)
@@ -104,15 +107,15 @@ class Decoder(torch.nn.Module):
                     nn.Sequential(
                         nn.Linear(
                             hidden_dim * layer_mult**2 * 4,
-                            hidden_dim * (layer_mult + 1)**2 * 4,
+                            hidden_dim * (layer_mult + 1) ** 2 * 4,
                         ),
-                        nn.BatchNorm1d(hidden_dim * (layer_mult + 1)**2 * 4),
+                        nn.BatchNorm1d(hidden_dim * (layer_mult + 1) ** 2 * 4),
                         nn.ReLU(),
                         nn.Dropout(p=dropout_rate),
                     )
                 )
 
-        self.fc_final = nn.Linear(hidden_dim * (num_layers + 1)**2 * 4, output_dim)
+        self.fc_final = nn.Linear(hidden_dim * (num_layers + 1) ** 2 * 4, output_dim)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -291,7 +294,7 @@ class CVAE(torch.nn.Module):
             dropout_rate=decoder_dropout_rate,
         )
 
-        self.use_checkpointing = True 
+        self.use_checkpointing = True
 
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         """
@@ -334,7 +337,7 @@ class CVAE(torch.nn.Module):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Reconstructed input, mean, and log-variance tensors.
         """
-        
+
         if self.training and self.use_checkpointing:
             # Checkpoint the major networks to save memory
             c_embs = checkpoint(self.molecular_embedding, c, use_reentrant=False)
@@ -343,7 +346,7 @@ class CVAE(torch.nn.Module):
             z = self.reparameterize(mu, logvar)
             z_cat = torch.cat((z, c_embs), dim=1)
             x_reconstructed = checkpoint(self.decoder, z_cat, use_reentrant=False)
-        
+
         else:
             c_embs = self.molecular_embedding(c)
             x = torch.cat((x, c_embs), dim=1)

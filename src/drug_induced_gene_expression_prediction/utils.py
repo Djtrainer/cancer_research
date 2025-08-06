@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import bitsandbytes.optim as bnb
 import imageio
@@ -163,13 +163,13 @@ def _run_epoch(
             moa_prediction = model.classify(mu)
 
             loss, recon, kl = vae_loss_function(
-                recon_x = recon_x,
-                x = expression,
-                mu = mu,
-                log_var = log_var,
-                latent_dim = model.latent_dim,
-                beta = beta,
-                recon_weight = config["alpha"],
+                recon_x=recon_x,
+                x=expression,
+                mu=mu,
+                log_var=log_var,
+                latent_dim=model.latent_dim,
+                beta=beta,
+                recon_weight=config["alpha"],
             )
             # print(f"BETA: {beta}, LOSS: {loss:.4f}, RECON_LOSS: {recon:.4f}, KL_LOSS: {kl:.4f}, LOG VAR: {torch.mean(log_var):.4f}, MU: {torch.mean(mu):.4f}")
             mask = moa_label != -1
@@ -211,7 +211,6 @@ def create_animation_frames(
     Args:
         epoch_history (list[dict]): List of dictionaries containing embeddings and labels for each epoch.
         animation_dir (str): Directory to save the animation frames.
-        df_meta_test (pd.DataFrame): Metadata DataFrame for the test set, used for coloring points.
 
     Returns:
         list[str]: List of file paths to the saved frame images.
@@ -297,27 +296,33 @@ def generate_embeddings(
     model: nn.Module, loader: DataLoader, device: torch.device
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generate latent embeddings (mu) and labels for a given dataset using a DataLoader.
+    Generates latent embeddings (mu) and MOA labels for all samples in a DataLoader using the provided model.
+
+    Args:
+        model (nn.Module): The trained model used to generate embeddings.
+        loader (DataLoader): DataLoader providing batches of (condition, expression, moa_label).
+        device (torch.device): Device to run computations on (e.g., 'cpu' or 'cuda').
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]:
+            - embeddings (np.ndarray): Array of latent embeddings (mu) for all samples.
+            - labels (np.ndarray): Array of MOA labels for all samples.
     """
     model.eval()
-    all_embeddings = []
-    all_labels = []
+    all_embeddings: list[np.ndarray] = []
+    all_labels: list[np.ndarray] = []
 
     with torch.no_grad():
         for condition, expression, moa_label in loader:
-            # Note: We only need expression and condition for the model input
             expression, condition = expression.to(device), condition.to(device)
-
-            # Forward pass to get the mean of the latent space
             _, mu, _ = model(expression, condition)
-
             all_embeddings.append(mu.cpu().numpy())
             all_labels.append(moa_label.numpy())
 
-    all_embeddings = np.concatenate(all_embeddings, axis=0)
-    all_labels = np.concatenate(all_labels, axis=0)
+    embeddings = np.concatenate(all_embeddings, axis=0)
+    labels = np.concatenate(all_labels, axis=0)
 
-    return all_embeddings, all_labels
+    return embeddings, labels
 
 
 def get_data(processed_data_path, batch_size) -> Tuple:
@@ -391,18 +396,19 @@ def get_model_weights(
     device: torch.device = torch.device("cpu"),
 ) -> CVAE:
     """
-    Initializes and returns a CVAE model with the specified configuration.
+    Initializes and returns a CVAE model with the specified configuration and moves it to the given device.
 
     Args:
         expression_dim (int): Number of gene expression features.
         num_classes (int): Number of MOA classes.
         conditional_dim (int): Dimension of the condition (fingerprint) vector.
         config (Dict[str, Any]): Dictionary containing model hyperparameters.
+        device (torch.device, optional): Device to move the model to. Defaults to CPU.
 
     Returns:
-        CVAE: Initialized CVAE model on the appropriate device.
+        CVAE: Initialized CVAE model on the specified device.
     """
-    model = CVAE(
+    model: CVAE = CVAE(
         expression_dim=expression_dim,
         num_classes=num_classes,
         condition_dim=conditional_dim,
@@ -464,29 +470,41 @@ def training_loop(
     df_meta_test: pd.DataFrame,
     wandb: wandb.sdk.wandb_run.Run,
     device: torch.device,
-) -> Tuple[CVAE, Dict[str, List[float]], List[dict]]:
+) -> Tuple[CVAE, Dict[str, List[float]], List[Dict[str, Any]]]:
     """
     Main training loop for the CVAE model.
+
     Args:
         config (Dict[str, Any]): Configuration dictionary containing model and training hyperparameters.
         model (CVAE): The CVAE model to train.
         train_loader (DataLoader): DataLoader for the training set.
         val_loader (DataLoader): DataLoader for the validation set.
         test_loader (DataLoader): DataLoader for the test set.
+        int_to_moa (Dict[int, str]): Mapping from integer MOA labels to string labels.
+        df_meta_test (pd.DataFrame): Metadata DataFrame for the test set.
+        wandb (wandb.sdk.wandb_run.Run): Weights & Biases run object for logging.
         device (torch.device): Device to run computations on (e.g., 'cpu' or 'cuda').
-    """
 
+    Returns:
+        Tuple[CVAE, Dict[str, List[float]], List[Dict[str, Any]]]:
+            - model (CVAE): The trained CVAE model.
+            - history (Dict[str, List[float]]): Dictionary containing lists of training and validation metrics per epoch.
+            - animation_data (List[Dict[str, Any]]): List of dictionaries containing embeddings and labels for each epoch for animation.
+    """
     if torch.cuda.is_available():
-        # Initialize BnB
         optimizer = bnb.Adam8bit(
-            model.parameters(), lr=config["learning_rate"], weight_decay=float(config["weight_decay"])
+            model.parameters(),
+            lr=config["learning_rate"],
+            weight_decay=float(config["weight_decay"]),
         )
     else:
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=config["learning_rate"], weight_decay=float(config["weight_decay"])
+            model.parameters(),
+            lr=config["learning_rate"],
+            weight_decay=float(config["weight_decay"]),
         )
 
-    history = {
+    history: Dict[str, List[float]] = {
         k: []
         for k in [
             "train_loss",
@@ -499,9 +517,8 @@ def training_loop(
             "val_class_loss",
         ]
     }
-    animation_data = []
+    animation_data: List[Dict[str, Any]] = []
 
-    # Main Training Loop
     pbar_epochs = tqdm(range(1, config["num_epochs"] + 1), desc="Overall Progress")
     for epoch in pbar_epochs:
         beta = (
@@ -509,7 +526,6 @@ def training_loop(
             if config.get("beta_anneal")
             else config["beta"]
         )
-        # print(f"BETA: {beta}")
         train_metrics = _run_epoch(
             model, train_loader, config, beta, device, optimizer=optimizer
         )
@@ -535,7 +551,6 @@ def training_loop(
             step=epoch,
         )
 
-        # Generate and store data for animation
         test_embeddings, all_moa_labels = generate_embeddings(
             model=model,
             loader=test_loader,
@@ -558,21 +573,27 @@ def training_loop(
 
     return model, history, animation_data
 
+
 def run_training_pipeline(
     config: Dict[str, Any],
     processed_data_path: str,
     batch_size: int,
     device: torch.device,
     is_sweep: bool = False,
-) -> None:
+) -> CVAE:
     """
     Runs the training pipeline for the CVAE model, including training, validation, logging,
     animation creation, and evaluation.
 
     Args:
         config (Dict[str, Any]): Dictionary containing model and training hyperparameters.
+        processed_data_path (str): Path to the processed data directory.
+        batch_size (int): Batch size for DataLoader.
+        device (torch.device): Device to run computations on (e.g., 'cpu' or 'cuda').
         is_sweep (bool, optional): Whether the run is part of a hyperparameter sweep. Defaults to False.
 
+    Returns:
+        CVAE: The trained CVAE model.
     """
     wandb.init(project="drug-induced-gene-expression-prediction", config=config)
     config = wandb.config
@@ -591,7 +612,7 @@ def run_training_pipeline(
     ) = get_data(processed_data_path, batch_size)
 
     # Initialize the model with the specified configuration
-    model = get_model_weights(
+    model: CVAE = get_model_weights(
         expression_dim=df_train.shape[1],
         num_classes=df_meta_train["moa_int"].nunique(),
         conditional_dim=df_meta_train["fingerprint"].iloc[0].shape[0],
@@ -614,33 +635,38 @@ def run_training_pipeline(
         wandb=wandb,
         device=device,
     )
-    
-    gsea_gen_error_list, gsea_recon_error_list = [], []
-    for (pert_id, drug_name) in [
+
+    gsea_gen_error_list: list[float] = []
+    gsea_recon_error_list: list[float] = []
+    for pert_id, drug_name in [
         ("BRD-K97764662", "Panobinostat"),
         ("BRD-A19037878", "Geldanamycin"),
-        ("BRD-K49049886", "Lapatinib")
-        ]:
-        gsea_recon_error_item, gsea_gen_error_item = evaluate_recon_and_gen_gsea_for_pert(
-            pert_id_to_test=pert_id,
-            drug_name=drug_name,
-            val_dataset=val_loader.dataset,
-            df_gene_mapping=df_gene_mapping,
-            img_save_path=img_save_path,
-            model=model,
-            device=device,
+        ("BRD-K49049886", "Lapatinib"),
+    ]:
+        gsea_recon_error_item, gsea_gen_error_item = (
+            evaluate_recon_and_gen_gsea_for_pert(
+                pert_id_to_test=pert_id,
+                drug_name=drug_name,
+                val_dataset=val_loader.dataset,
+                df_gene_mapping=df_gene_mapping,
+                img_save_path=img_save_path,
+                model=model,
+                device=device,
+            )
         )
         gsea_recon_error_list.append(gsea_recon_error_item)
         gsea_gen_error_list.append(gsea_gen_error_item)
 
-    gsea_recon_error = np.mean(gsea_recon_error_list)
-    gsea_gen_error = np.mean(gsea_gen_error_list)
+    gsea_recon_error: float = np.mean(gsea_recon_error_list)
+    gsea_gen_error: float = np.mean(gsea_gen_error_list)
 
+    train_corr: float
+    val_corr: float
     train_corr, val_corr = get_recon_correlation(
         model, train_loader, val_loader, img_save_path, device=device
     )
 
-    total_error_to_minimize = (
+    total_error_to_minimize: float = (
         gsea_recon_error + gsea_gen_error + (1 - train_corr) + (1 - val_corr)
     )
     wandb.log(
@@ -653,8 +679,10 @@ def run_training_pipeline(
         }
     )
     # Create and Log Animation
-    frame_files = create_animation_frames(animation_data, animation_save_path)
-    animation_path = os.path.join(animation_save_path, "training_animation.gif")
+    frame_files: list[str] = create_animation_frames(
+        animation_data, animation_save_path
+    )
+    animation_path: str = os.path.join(animation_save_path, "training_animation.gif")
     build_animation_gif(frame_files, animation_path, duration=0.5)
     wandb.log({"training_animation": wandb.Video(animation_path, fps=2, format="gif")})
     plot_training_history(history)
