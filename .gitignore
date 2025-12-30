@@ -11,3 +11,4 @@ __pycache__/
 *.pyc
 wandb
 project_ideas.md
+sarcoma_ideas.md
