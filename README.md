@@ -96,9 +96,13 @@ This repository is designed for data scientists, bioinformaticians, and research
   <tr>
     <td align="center">
       <img src="imgs/drug_induced_gene_expression_prediction/model_architecture.png" alt="Model Architecture" width="100%">
+      <br>
+      <sub>Conditional VAE framework integrating reconstruction, regularization, and classification objectives.</sub>
     </td>
     <td align="center">
       <img src="imgs/drug_induced_gene_expression_prediction/gsea_comparison_Geldanamycin.png" alt="GSEA plot" width="100%">
+      <br>
+      <sub>GSEA validation comparing original vs. generated gene signatures for the HSP90 inhibitor Geldanamycin.</sub>
     </td>
   </tr>
   <tr>
@@ -107,6 +111,8 @@ This repository is designed for data scientists, bioinformaticians, and research
   <tr>
     <td colspan="2" align="center">
       <img src="imgs/drug_induced_gene_expression_prediction/PCA.png" alt="PCA Evolution" width="100%">
+      <br>
+      <sub>Evolution of latent space structure and cluster separation observed over 20 training epochs.</sub>
     </td>
   </tr>
 </table>
