@@ -88,16 +88,29 @@ This repository is designed for data scientists, bioinformaticians, and research
 
   * **Stable and Well-Regularized Training**: The model achieved a stable training process, with validation loss tracking closely with training loss, indicating good generalization. 
 
-  <table>
-    <tr>
-      <td align="center"><strong>PCA of Latent Space Evolution</strong></td>
-      <td align="center"><strong>GSEA Validation for Geldanamycin</strong></td>
-    </tr>
-    <tr>
-      <td><img src="imgs/drug_induced_gene_expression_prediction/training_animation.gif" alt="Training PCA Animation" width="450"></td>
-      <td><img src="imgs/drug_induced_gene_expression_prediction/gsea_comparison_Geldanamycin.png" alt="GSEA plot" width="450"></td>
-    </tr>
-  </table>
+<table>
+  <tr>
+    <th width="50%">Model Architecture</th>
+    <th width="50%">GSEA Validation</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="imgs/drug_induced_gene_expression_prediction/model_architecture.png" alt="Model Architecture" width="100%">
+    </td>
+    <td align="center">
+      <img src="imgs/drug_induced_gene_expression_prediction/gsea_comparison_Geldanamycin.png" alt="GSEA plot" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <th colspan="2">PCA of Latent Space Evolution</th>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="imgs/drug_induced_gene_expression_prediction/PCA.png" alt="PCA Evolution" width="100%">
+    </td>
+  </tr>
+</table>
+
 ---
 
 ### 3. Exploratory Data Analysis (EDA) of Gene Expression Data
