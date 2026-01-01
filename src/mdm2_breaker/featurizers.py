@@ -1,7 +1,11 @@
+import os
+import pandas as pd
 import numpy as np
 import torch
 from Bio.PDB import PDBParser
-from torch_geometric.data import Data
+from torch_geometric.data import Data, InMemoryDataset
+from rdkit import Chem
+from tqdm import tqdm 
 
 
 class ProteinFeaturizer:
@@ -106,3 +110,86 @@ class ProteinFeaturizer:
         )
 
         return data
+
+
+class SmallMoleculeFeaturizer(InMemoryDataset):
+    def __init__(self, root, file_path: str = None, transform=None, pre_transform=None):
+        """
+        Featurizes a small molecule into a PyG Data object.
+        Args:
+            root (str): Root directory of the dataset.
+            file_path (str): Path to the file containing the small molecules.
+            transform (callable, optional): A function/transform that takes in an
+                :obj:`torch_geometric.data.Data` object and returns a transformed
+                version. The data object will be transformed before every access.
+            pre_transform (callable, optional): A function/transform that takes in
+                an :obj:`torch_geometric.data.Data` object and returns a transformed
+                version. The data object will be transformed before saving to disk.
+        """
+        self.file_path = file_path
+        super(SmallMoleculeFeaturizer, self).__init__(root, transform, pre_transform)
+        self.data, self.slices = torch.load(self.processed_paths[0])
+
+    @property
+    def raw_file_names(self):
+        """
+        PyG expects a value here, but we don't need it.
+        """
+        return []
+
+    @property
+    def processed_file_names(self):
+        """
+        Name of the processed file.
+        """
+        return ["mdm2_graphs.pt"]
+
+    def process(self):
+        df = pd.read_csv(self.file_path, sep='\t', on_bad_lines='skip', low_memory=False)
+
+        # Select important columns
+        df = df[['Ligand SMILES', 'IC50 (nM)', 'Target Name', 'Target Source Organism According to Curator or DataSource']]
+        df.columns = ['SMILES', 'IC50', 'Target', 'Organism']
+        
+        # Filter for MDM2 + Human
+        df = df[
+            df['Target'].astype(str).str.contains('Mdm2', case=False) & 
+            df['Organism'].astype(str).str.contains('Homo sapiens', case=False)
+        ]
+
+        # Clean numeric IC50
+        df['IC50_numeric'] = pd.to_numeric(
+            df['IC50'].astype(str).str.replace(r'[<>]', '', regex=True), 
+            errors='coerce'
+        )
+
+        # Calculate pIC50
+        df['pIC50'] = -np.log10(df['IC50_numeric'] * 1e-9)
+        
+        # Drop junk
+        df = df.dropna(subset=['pIC50', 'SMILES'])
+
+        data_list = []
+        allowed_atoms = [6, 7, 8, 9, 16, 17, 35, 53] # C, N, O, F, P, S, Cl, Br, I
+
+        for _, row in tqdm(df.iterrows(), total=len(df)):
+            smiles = row['SMILES']
+            pIC50 = float(row['pIC50'])
+
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                continue
+
+            # Filter for allowed atoms
+            node_feats = []
+            for atom in mol.GetAtoms():
+                an = atom.GetAtomicNum()
+                if an in allowed_atoms:
+                    node_feats.append(allowed_atoms.index(an))
+                else:
+                    node_feats.append(len(allowed_atoms)) # Other bucket
+
+            x = torch.tensor(node_feats, dtype=torch.long).unsqueeze(1)
+
+            #Edge Index (Bonds)
+            row_idx, 
