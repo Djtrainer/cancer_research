@@ -100,7 +100,7 @@ This repository is designed for data scientists, bioinformaticians, and research
       <sub>Conditional VAE framework integrating reconstruction, regularization, and classification objectives.</sub>
     </td>
     <td align="center">
-      <img src="imgs/drug_induced_gene_expression_prediction/gsea_comparison_Geldanamycin.png" alt="GSEA plot" width="100%">
+      <img src="imgs/drug_induced_gene_expression_prediction/GSEA.png" alt="GSEA plot" width="100%">
       <br>
       <sub>GSEA validation comparing original vs. generated gene signatures for the HSP90 inhibitor Geldanamycin.</sub>
     </td>
