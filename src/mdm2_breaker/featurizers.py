@@ -79,7 +79,7 @@ class ProteinFeaturizer:
         distances = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=-1)
 
         # Create Edge list
-        src, dst = np.where(distances < self.contact_threshold & distances > 0)
+        src, dst = np.where((distances < self.contact_threshold) & (distances > 0))
 
         # Convert to PyTorch tensor
         edge_index = torch.tensor([src, dst], dtype=torch.long)
@@ -102,7 +102,7 @@ class ProteinFeaturizer:
 
         # Pack into a Graph
         data = Data(
-            x=x, edge_index=edge_index, pos=torch.tensor(coords, dtype=torch.float())
+            x=x, edge_index=edge_index, pos=torch.tensor(coords, dtype=torch.float)
         )
 
         return data
