@@ -128,7 +128,7 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
         """
         self.file_path = file_path
         super(SmallMoleculeFeaturizer, self).__init__(root, transform, pre_transform)
-        self.data, self.slices = torch.load(self.processed_paths[0])
+        self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
 
     @property
     def raw_file_names(self):
@@ -143,6 +143,12 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
         Name of the processed file.
         """
         return ["mdm2_graphs.pt"]
+
+    def download(self):
+        """
+        Download the dataset from the internet. (Not needed for this dataset)
+        """
+        pass
 
     def process(self):
         df = pd.read_csv(self.file_path, sep='\t', on_bad_lines='skip', low_memory=False)
@@ -192,4 +198,20 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
             x = torch.tensor(node_feats, dtype=torch.long).unsqueeze(1)
 
             #Edge Index (Bonds)
-            row_idx, 
+            row_idx, col_idx = [], []
+            for bond in mol.GetBonds():
+                start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                row_idx.append(start)
+                col_idx.append(end)
+            
+            edge_index = torch.tensor([row_idx, col_idx], dtype=torch.long)
+
+            # Create Data Object
+            data = Data(x = x, edge_index = edge_index, y=torch.tensor([pIC50]), dtype=torch.float)
+            data_list.append(data)
+
+        if len(data_list) == 0:
+            raise RuntimeError("No valid molecules found.")
+        
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
