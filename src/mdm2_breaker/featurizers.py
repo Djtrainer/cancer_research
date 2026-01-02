@@ -1,11 +1,11 @@
-import os
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import torch
 from Bio.PDB import PDBParser
-from torch_geometric.data import Data, InMemoryDataset
 from rdkit import Chem
-from tqdm import tqdm 
+from torch_geometric.data import Data, InMemoryDataset
+from tqdm import tqdm
 
 
 class ProteinFeaturizer:
@@ -151,36 +151,44 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
         pass
 
     def process(self):
-        df = pd.read_csv(self.file_path, sep='\t', on_bad_lines='skip', low_memory=False)
+        df = pd.read_csv(
+            self.file_path, sep="\t", on_bad_lines="skip", low_memory=False
+        )
 
         # Select important columns
-        df = df[['Ligand SMILES', 'IC50 (nM)', 'Target Name', 'Target Source Organism According to Curator or DataSource']]
-        df.columns = ['SMILES', 'IC50', 'Target', 'Organism']
-        
+        df = df[
+            [
+                "Ligand SMILES",
+                "IC50 (nM)",
+                "Target Name",
+                "Target Source Organism According to Curator or DataSource",
+            ]
+        ]
+        df.columns = ["SMILES", "IC50", "Target", "Organism"]
+
         # Filter for MDM2 + Human
         df = df[
-            df['Target'].astype(str).str.contains('Mdm2', case=False) & 
-            df['Organism'].astype(str).str.contains('Homo sapiens', case=False)
+            df["Target"].astype(str).str.contains("Mdm2", case=False)
+            & df["Organism"].astype(str).str.contains("Homo sapiens", case=False)
         ]
 
         # Clean numeric IC50
-        df['IC50_numeric'] = pd.to_numeric(
-            df['IC50'].astype(str).str.replace(r'[<>]', '', regex=True), 
-            errors='coerce'
+        df["IC50_numeric"] = pd.to_numeric(
+            df["IC50"].astype(str).str.replace(r"[<>]", "", regex=True), errors="coerce"
         )
 
         # Calculate pIC50
-        df['pIC50'] = -np.log10(df['IC50_numeric'] * 1e-9)
-        
+        df["pIC50"] = -np.log10(df["IC50_numeric"] * 1e-9)
+
         # Drop junk
-        df = df.dropna(subset=['pIC50', 'SMILES'])
+        df = df.dropna(subset=["pIC50", "SMILES"])
 
         data_list = []
-        allowed_atoms = [6, 7, 8, 9, 16, 17, 35, 53] # C, N, O, F, P, S, Cl, Br, I
+        allowed_atoms = [6, 7, 8, 9, 16, 17, 35, 53]  # C, N, O, F, P, S, Cl, Br, I
 
         for _, row in tqdm(df.iterrows(), total=len(df)):
-            smiles = row['SMILES']
-            pIC50 = float(row['pIC50'])
+            smiles = row["SMILES"]
+            pIC50 = float(row["pIC50"])
 
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
@@ -193,25 +201,27 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
                 if an in allowed_atoms:
                     node_feats.append(allowed_atoms.index(an))
                 else:
-                    node_feats.append(len(allowed_atoms)) # Other bucket
+                    node_feats.append(len(allowed_atoms))  # Other bucket
 
             x = torch.tensor(node_feats, dtype=torch.long).unsqueeze(1)
 
-            #Edge Index (Bonds)
+            # Edge Index (Bonds)
             row_idx, col_idx = [], []
             for bond in mol.GetBonds():
                 start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
                 row_idx.append(start)
                 col_idx.append(end)
-            
+
             edge_index = torch.tensor([row_idx, col_idx], dtype=torch.long)
 
             # Create Data Object
-            data = Data(x = x, edge_index = edge_index, y=torch.tensor([pIC50]), dtype=torch.float)
+            data = Data(
+                x=x, edge_index=edge_index, y=torch.tensor([pIC50]), dtype=torch.float
+            )
             data_list.append(data)
 
         if len(data_list) == 0:
             raise RuntimeError("No valid molecules found.")
-        
+
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
