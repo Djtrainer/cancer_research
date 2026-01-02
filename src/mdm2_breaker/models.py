@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.data import Data
 
 
 class GCNEncoder(torch.nn.Module):
@@ -48,9 +49,7 @@ class GraphSiameseNetwork(torch.nn.Module):
             torch.nn.Linear(hidden_channels // 4, 1),
         )
 
-    def forward(
-        self, protein_data: torch.Tensor, molecule_data: torch.Tensor
-    ) -> torch.Tensor:
+    def encode_protein(self, protein_data: torch.Tensor) -> torch.Tensor:
         # Protein Encoding
         # [num_protein_nodes, protein_in_channels] -> [num_protein_nodes, protein_out_channels]
         protein_embedding = self.protein_encoder(
@@ -59,19 +58,28 @@ class GraphSiameseNetwork(torch.nn.Module):
         # Global Mean Pooling
         # [num_protein_nodes, protein_out_channels] -> [batch_size, protein_out_channels]
         protein_embedding = global_mean_pool(protein_embedding, protein_data.batch)
+        return protein_embedding
 
+    def encode_molecule(self, molecule_data: torch.Tensor) -> torch.Tensor:
         # Molecule Embedding
         # [total_mol_atoms, 1] -> [total_mol_atoms, molecule_embedding_dim]
         molecule_embedding = self.molecule_embedding(molecule_data.x.squeeze())
         # Molecule Encoding
         # [total_mol_atoms, molecule_embedding_dim] -> [total_mol_atoms, molecule_out_channels]
-        molecule_embedding = self.molecule_encoder(
-            molecule_embedding, molecule_data.edge_index
-        )
+        molecule_embedding = self.molecule_encoder(molecule_embedding, molecule_data.edge_index)
         # Global Mean Pooling
         # [total_mol_atoms, molecule_out_channels] -> [batch_size, molecule_out_channels]
         molecule_embedding = global_mean_pool(molecule_embedding, molecule_data.batch)
-        
+        return molecule_embedding
+
+    def forward(self, protein_data: Data, molecule_data: Data) -> torch.Tensor:
+        # Protein Encoding
+        # [num_protein_nodes, protein_in_channels] -> [batch_size, protein_out_channels]
+        protein_embedding = self.encode_protein(protein_data)
+
+        # Molecule Encoding
+        # [num_molecule_nodes, 1] -> [batch_size, molecule_out_channels]
+        molecule_embedding = self.encode_molecule(molecule_data)
         
         # Combine the protein and molecule embeddings
         batch_size = molecule_embedding.size(0)
