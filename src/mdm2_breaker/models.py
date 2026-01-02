@@ -49,7 +49,7 @@ class GraphSiameseNetwork(torch.nn.Module):
             torch.nn.Linear(hidden_channels // 4, 1),
         )
 
-    def encode_protein(self, protein_data: torch.Tensor) -> torch.Tensor:
+    def encode_protein(self, protein_data: Data) -> torch.Tensor:
         # Protein Encoding
         # [num_protein_nodes, protein_in_channels] -> [num_protein_nodes, protein_out_channels]
         protein_embedding = self.protein_encoder(
@@ -60,7 +60,7 @@ class GraphSiameseNetwork(torch.nn.Module):
         protein_embedding = global_mean_pool(protein_embedding, protein_data.batch)
         return protein_embedding
 
-    def encode_molecule(self, molecule_data: torch.Tensor) -> torch.Tensor:
+    def encode_molecule(self, molecule_data: Data) -> torch.Tensor:
         # Molecule Embedding
         # [total_mol_atoms, 1] -> [total_mol_atoms, molecule_embedding_dim]
         molecule_embedding = self.molecule_embedding(molecule_data.x.squeeze())
