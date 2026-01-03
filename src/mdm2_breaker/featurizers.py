@@ -209,8 +209,12 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
             row_idx, col_idx = [], []
             for bond in mol.GetBonds():
                 start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                # Add Bond A -> B
                 row_idx.append(start)
                 col_idx.append(end)
+                # Add Bond B -> A 
+                row_idx.append(end)
+                col_idx.append(start)
 
             edge_index = torch.tensor([row_idx, col_idx], dtype=torch.long)
 
