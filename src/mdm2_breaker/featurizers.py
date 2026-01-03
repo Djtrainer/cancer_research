@@ -88,7 +88,7 @@ class ProteinFeaturizer:
         # Convert to PyTorch tensor
         edge_index = torch.tensor([src, dst], dtype=torch.long)
 
-        return edge_index.t()
+        return edge_index
 
     def get_graph(self):
         """
