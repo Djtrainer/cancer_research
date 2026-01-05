@@ -183,12 +183,16 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
         # Drop junk
         df = df.dropna(subset=["pIC50", "SMILES"])
 
+        global_mean = df["pIC50"].mean()
+        global_std = df["pIC50"].std()
+        
+        df["pIC50_norm"] = (df["pIC50"] - global_mean) / global_std
+        
         data_list = []
         allowed_atoms = [6, 7, 8, 9, 16, 17, 35, 53]  # C, N, O, F, P, S, Cl, Br, I
-
         for _, row in tqdm(df.iterrows(), total=len(df)):
             smiles = row["SMILES"]
-            pIC50 = float(row["pIC50"])
+            pIC50_norm = float(row["pIC50_norm"])
 
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
@@ -220,7 +224,7 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
 
             # Create Data Object
             data = Data(
-                x=x, edge_index=edge_index, y=torch.tensor([pIC50]), dtype=torch.float
+                x=x, edge_index=edge_index, y=torch.tensor([pIC50_norm]), dtype=torch.float
             )
             data_list.append(data)
 
@@ -229,3 +233,4 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
+        torch.save({'mean': global_mean, 'std': global_std}, self.processed_paths[0].replace('.pt', '_stats.pt'))
