@@ -231,6 +231,9 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
         if len(data_list) == 0:
             raise RuntimeError("No valid molecules found.")
 
+        csv_path = self.processed_paths[0].replace('.pt', '.csv')
+        df.to_csv(csv_path, index=False)
+    
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
         torch.save({'mean': global_mean, 'std': global_std}, self.processed_paths[0].replace('.pt', '_stats.pt'))
