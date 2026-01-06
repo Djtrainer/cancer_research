@@ -1,1 +1,1 @@
-from .featurizers import ProteinFeaturizer, SmallMoleculeFeaturizer
+from .featurizers import ProteinFeaturizer, SmallMoleculeFeaturizer, SmallMoleculeFeaturizer_v2

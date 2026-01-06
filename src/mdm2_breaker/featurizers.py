@@ -237,3 +237,143 @@ class SmallMoleculeFeaturizer(InMemoryDataset):
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
         torch.save({'mean': global_mean, 'std': global_std}, self.processed_paths[0].replace('.pt', '_stats.pt'))
+
+
+class SmallMoleculeFeaturizer_v2(InMemoryDataset):
+    def __init__(self, root, file_path: str = None, transform=None, pre_transform=None):
+        """
+        Featurizes a small molecule into a PyG Data object.
+        Args:
+            root (str): Root directory of the dataset.
+            file_path (str): Path to the file containing the small molecules.
+            transform (callable, optional): A function/transform that takes in an
+                :obj:`torch_geometric.data.Data` object and returns a transformed
+                version. The data object will be transformed before every access.
+            pre_transform (callable, optional): A function/transform that takes in
+                an :obj:`torch_geometric.data.Data` object and returns a transformed
+                version. The data object will be transformed before saving to disk.
+        """
+        self.file_path = file_path
+        super(SmallMoleculeFeaturizer_v2, self).__init__(root, transform, pre_transform)
+        self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
+
+    @property
+    def raw_file_names(self):
+        """
+        PyG expects a value here, but we don't need it.
+        """
+        return []
+
+    @property
+    def processed_file_names(self):
+        """
+        Name of the processed file.
+        """
+        return ["mdm2_graphs.pt"]
+
+    def download(self):
+        """
+        Download the dataset from the internet. (Not needed for this dataset)
+        """
+        pass
+
+    def process(self):
+        df = pd.read_csv(
+            self.file_path, sep="\t", on_bad_lines="skip", low_memory=False
+        )
+
+        # Select important columns
+        df = df[
+            [
+                "Ligand SMILES",
+                "IC50 (nM)",
+                "Target Name",
+                "Target Source Organism According to Curator or DataSource",
+            ]
+        ]
+        df.columns = ["SMILES", "IC50", "Target", "Organism"]
+
+        # Filter for MDM2 + Human
+        df = df[
+            df["Target"].astype(str).str.contains("Mdm2", case=False)
+            & df["Organism"].astype(str).str.contains("Homo sapiens", case=False)
+        ]
+
+        # Clean numeric IC50
+        df["IC50_numeric"] = pd.to_numeric(
+            df["IC50"].astype(str).str.replace(r"[<>]", "", regex=True), errors="coerce"
+        )
+
+        # Calculate pIC50
+        df["pIC50"] = -np.log10(df["IC50_numeric"] * 1e-9)
+
+        # Drop junk
+        df = df.dropna(subset=["pIC50", "SMILES"])
+
+        global_mean = df["pIC50"].mean()
+        global_std = df["pIC50"].std()
+        
+        df["pIC50_norm"] = (df["pIC50"] - global_mean) / global_std
+        
+        def get_bond_feature(bond):
+            # 0=Single, 1=Double, 2=Triple, 3=Aromatic
+            bt = bond.GetBondType()
+            if bt == Chem.rdchem.BondType.SINGLE: return [1,0,0,0]
+            if bt == Chem.rdchem.BondType.DOUBLE: return [0,1,0,0]
+            if bt == Chem.rdchem.BondType.TRIPLE: return [0,0,1,0]
+            if bt == Chem.rdchem.BondType.AROMATIC: return [0,0,0,1]
+            return [0,0,0,0]
+
+        data_list = []
+        allowed_atoms = [6, 7, 8, 9, 16, 17, 35, 53]  # C, N, O, F, P, S, Cl, Br, I
+        for _, row in tqdm(df.iterrows(), total=len(df)):
+            smiles = row["SMILES"]
+            pIC50_norm = float(row["pIC50_norm"])
+
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                continue
+
+            # Filter for allowed atoms
+            node_feats = []
+            for atom in mol.GetAtoms():
+                an = atom.GetAtomicNum()
+                if an in allowed_atoms:
+                    node_feats.append(allowed_atoms.index(an))
+                else:
+                    node_feats.append(len(allowed_atoms))  # Other bucket
+
+            x = torch.tensor(node_feats, dtype=torch.long).unsqueeze(1)
+
+            # Edge Index (Bonds)
+            row_idx, col_idx = [], []
+            bond_features = []
+            for bond in mol.GetBonds():
+                start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                bond_features.append(get_bond_feature(bond))
+                
+                # Add Bond A -> B
+                row_idx.append(start)
+                col_idx.append(end)
+                # Add Bond B -> A 
+                row_idx.append(end)
+                col_idx.append(start)
+
+            edge_index = torch.tensor([row_idx, col_idx], dtype=torch.long)
+            bond_features = torch.tensor(bond_features, dtype=torch.float)
+
+            # Create Data Object
+            data = Data(
+                x=x, edge_index=edge_index, edge_attr=bond_features, y=torch.tensor([pIC50_norm]), dtype=torch.float
+            )
+            data_list.append(data)
+
+        if len(data_list) == 0:
+            raise RuntimeError("No valid molecules found.")
+
+        csv_path = self.processed_paths[0].replace('.pt', '.csv')
+        df.to_csv(csv_path, index=False)
+    
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
+        torch.save({'mean': global_mean, 'std': global_std}, self.processed_paths[0].replace('.pt', '_stats.pt'))
