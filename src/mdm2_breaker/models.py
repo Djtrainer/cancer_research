@@ -6,6 +6,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import (
     GATv2Conv,
     GCNConv,
+    GINEConv,
     global_add_pool,
     global_max_pool,
 )
@@ -49,6 +50,92 @@ class GatCNEncoder(torch.nn.Module):
         x = F.leaky_relu(self.conv3(x, edge_index, edge_attr))
         x = self.conv4(x, edge_index, edge_attr)
         return x
+
+    def forward_with_attention(
+        self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Pass through first 3 layers normally
+        x = F.leaky_relu(self.conv1(x, edge_index, edge_attr))
+        x = F.leaky_relu(self.conv2(x, edge_index, edge_attr))
+        x = F.leaky_relu(self.conv3(x, edge_index, edge_attr))
+
+        # FINAL LAYER: Get weights!
+        # This returns a tuple: (node_embeddings, (edge_index, alpha))
+        x, (att_edge_index, att_weights) = self.conv4(
+            x, edge_index, edge_attr, return_attention_weights=True
+        )
+        return x, att_edge_index, att_weights
+
+
+class GINEEncoder(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        
+        # Helper to create the MLP required by GINE
+        # Input -> Batch Norm -> ReLU -> Linear
+        def make_mlp(in_dim, out_dim):
+            return torch.nn.Sequential(
+                torch.nn.Linear(in_dim, out_dim),
+                torch.nn.BatchNorm1d(out_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(out_dim, out_dim)
+            )
+
+        # Layer 1: Project from Input (128) to Output (128)
+        self.conv1 = GINEConv(make_mlp(in_channels, out_channels), edge_dim=4)
+        
+        # Layer 2: Keep dims constant (128 -> 128)
+        self.conv2 = GINEConv(make_mlp(out_channels, out_channels), edge_dim=4)
+        
+        # Layer 3
+        self.conv3 = GINEConv(make_mlp(out_channels, out_channels), edge_dim=4)
+        
+        # Layer 4
+        self.conv4 = GINEConv(make_mlp(out_channels, out_channels), edge_dim=4)
+
+    def forward(self, x, edge_index, edge_attr):
+        # GINE includes ReLU inside the MLP, so we often don't need extra ReLUs here,
+        # but adding them between blocks is fine.
+        x = self.conv1(x, edge_index, edge_attr)
+        x = self.conv2(x, edge_index, edge_attr)
+        x = self.conv3(x, edge_index, edge_attr)
+        x = self.conv4(x, edge_index, edge_attr)
+        return x
+
+
+class AtomEncoder(torch.nn.Module):
+    def __init__(self, embedding_dim=64):
+        super().__init__()
+        # 1. Embeddings for Categorical Features
+        # Atomic Num (0-118)
+        self.z_embed = torch.nn.Embedding(120, embedding_dim // 2)
+        # Hybridization (0-5)
+        self.hyb_embed = torch.nn.Embedding(6, embedding_dim // 4)
+        # Chirality (0-2)
+        self.chir_embed = torch.nn.Embedding(3, embedding_dim // 4)
+
+        # 2. Linear "Lifter" for Continuous Features
+        # Input: 6 floats (Mass, Degree, Charge, Aromatic, Ring, H-Count)
+        # Output: Match embedding dimension
+        self.float_lin = torch.nn.Linear(6, embedding_dim)
+
+        # Final Output Dimension = (32 + 16 + 16) + 64 = 128
+        self.out_dim = embedding_dim + embedding_dim
+
+    def forward(self, x_cat, x_scalar):
+        # x_cat shape: [Num_Atoms, 3]
+        z = self.z_embed(x_cat[:, 0])  # [N, 32]
+        h = self.hyb_embed(x_cat[:, 1])  # [N, 16]
+        c = self.chir_embed(x_cat[:, 2])  # [N, 16]
+
+        # Concatenate embeddings -> [N, 64]
+        cats = torch.cat([z, h, c], dim=1)
+
+        # Project floats -> [N, 64]
+        floats = self.float_lin(x_scalar)
+
+        # Fuse them -> [N, 128]
+        return torch.cat([cats, floats], dim=1)
 
 
 class GraphSiameseNetworkBase(torch.nn.Module, ABC):
@@ -192,7 +279,7 @@ class GraphSiameseNetwork_v3(GraphSiameseNetworkBase):
     def __init__(
         self,
         protein_in_channels: int = 20,
-        molecule_in_channels: int = 8,
+        molecule_in_channels: int = 128,
         out_channels: int = 128,
         molecule_embedding_dim: int = 64,
     ):
@@ -202,18 +289,123 @@ class GraphSiameseNetwork_v3(GraphSiameseNetworkBase):
             out_channels=out_channels,
             molecule_embedding_dim=molecule_embedding_dim,
         )
-
+        self.atom_encoder = AtomEncoder(embedding_dim=molecule_embedding_dim)
         self.molecule_encoder = GatCNEncoder(
             in_channels=molecule_in_channels,
             out_channels=out_channels,
         )
 
     def encode_molecule(self, molecule_data: Data) -> torch.Tensor:
+        x_cat = molecule_data.x[:, :3].long()
+        x_scalar = molecule_data.x[:, 3:].float()
+
+        molecule_embedding = self.atom_encoder(x_cat, x_scalar)
         molecule_embedding = self.molecule_encoder(
-            molecule_data.x.float(), molecule_data.edge_index, molecule_data.edge_attr
+            molecule_embedding, molecule_data.edge_index, molecule_data.edge_attr
         )
 
         v_sum = global_add_pool(molecule_embedding, molecule_data.batch)
         v_max = global_max_pool(molecule_embedding, molecule_data.batch)
 
         return torch.cat([v_sum, v_max], dim=1)
+
+    def get_attention_for_molecule(
+        self, molecule_data: Data
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x_cat = molecule_data.x[:, :3].long()
+        x_scalar = molecule_data.x[:, 3:].float()
+
+        molecule_embedding = self.atom_encoder(x_cat, x_scalar)
+        molecule_embedding, att_edge_index, att_weights = self.molecule_encoder.forward_with_attention(
+            molecule_embedding, molecule_data.edge_index, molecule_data.edge_attr
+        )
+
+        return molecule_embedding, att_edge_index, att_weights
+
+
+# --- VERSION 4 (GINEConv Encoder, Rich Atoms + Bond Attributes) ---
+class GraphSiameseNetwork_v4(GraphSiameseNetworkBase):
+    def __init__(
+        self,
+        protein_in_channels: int = 20,
+        molecule_in_channels: int = 128,
+        out_channels: int = 128,
+        molecule_embedding_dim: int = 64,
+    ):
+        super(GraphSiameseNetwork_v4, self).__init__(
+            protein_in_channels=protein_in_channels,
+            molecule_in_channels=molecule_in_channels,
+            out_channels=out_channels,
+            molecule_embedding_dim=molecule_embedding_dim,
+        )
+        self.atom_encoder = AtomEncoder(embedding_dim=molecule_embedding_dim)
+        self.molecule_encoder = GINEEncoder(
+            in_channels=molecule_in_channels,
+            out_channels=out_channels,
+        )
+    
+    def encode_molecule(self, molecule_data: Data) -> torch.Tensor:
+        x_cat = molecule_data.x[:, :3].long()
+        x_scalar = molecule_data.x[:, 3:].float()
+
+        molecule_embedding = self.atom_encoder(x_cat, x_scalar)
+        molecule_embedding = self.molecule_encoder(molecule_embedding, molecule_data.edge_index, molecule_data.edge_attr)
+
+        v_sum = global_add_pool(molecule_embedding, molecule_data.batch)
+        v_max = global_max_pool(molecule_embedding, molecule_data.batch)
+
+        return torch.cat([v_sum, v_max], dim=1)
+
+
+# --- VERSION 5 (GINEConv Encoder, Rich Atoms + Bond Attributes) + Fingerprints Model ---
+class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
+    def __init__(
+        self,
+        protein_in_channels: int = 20,
+        molecule_in_channels: int = 128,
+        out_channels: int = 128,
+        molecule_embedding_dim: int = 64,
+        fingerprints_model_dim: int = 2052,
+    ):
+        super(GraphSiameseNetwork_v5, self).__init__(
+            protein_in_channels=protein_in_channels,
+            molecule_in_channels=molecule_in_channels,
+            out_channels=out_channels,
+            molecule_embedding_dim=molecule_embedding_dim,
+        )
+
+        # Current GNN Output: (Protein Sum+Max) + (Molecule Sum+Max)
+        # Protein: 128 * 2 = 256
+        # Molecule: 128 * 2 = 256
+        gnn_output_dim = out_channels * 4
+        
+        # New Total Input
+        total_input_dim = gnn_output_dim + fingerprints_model_dim # 512 + 2052 = 2564
+        
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(total_input_dim, 1024),
+            torch.nn.BatchNorm1d(1024), # Essential for mixing distinct feature types
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.3),      # High dropout to prevent overfitting on the large fingerprint
+            
+            torch.nn.Linear(1024, 512),
+            torch.nn.BatchNorm1d(512),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.2),
+            
+            torch.nn.Linear(512, 1)
+        )
+
+    def forward(self, protein_data: Data, molecule_data: Data) -> torch.Tensor:
+        prot_vec = self.encode_protein(protein_data)
+        mol_vec = self.encode_molecule(molecule_data)
+
+        if prot_vec.shape[0] != mol_vec.shape[0]:
+            prot_vec = prot_vec.expand(mol_vec.shape[0], -1)
+
+        #retrieve expert features - molecule_data.expert_features is [Batch, 1, 2052]
+        expert_features = molecule_data.expert_features.squeeze(1)
+        
+        #concatenate [Batch, 256 + 256 + 2052]
+        combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
+        return self.mlp(combined)
