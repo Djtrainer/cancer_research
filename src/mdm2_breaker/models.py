@@ -55,22 +55,20 @@ class GatCNEncoder(torch.nn.Module):
         self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Pass through first 3 layers normally
-        x = F.leaky_relu(self.conv1(x, edge_index, edge_attr))
-        x = F.leaky_relu(self.conv2(x, edge_index, edge_attr))
-        x = F.leaky_relu(self.conv3(x, edge_index, edge_attr))
-
-        # FINAL LAYER: Get weights!
-        # This returns a tuple: (node_embeddings, (edge_index, alpha))
-        x, (att_edge_index, att_weights) = self.conv4(
+        x, (att_edge_index, att_weights) = self.conv1(
             x, edge_index, edge_attr, return_attention_weights=True
         )
+        x = F.leaky_relu(self.conv2(x, edge_index, edge_attr))
+        x = F.leaky_relu(self.conv3(x, edge_index, edge_attr))
+        x = self.conv4(x, edge_index, edge_attr)
+
         return x, att_edge_index, att_weights
 
 
 class GINEEncoder(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        
+
         # Helper to create the MLP required by GINE
         # Input -> Batch Norm -> ReLU -> Linear
         def make_mlp(in_dim, out_dim):
@@ -78,18 +76,18 @@ class GINEEncoder(torch.nn.Module):
                 torch.nn.Linear(in_dim, out_dim),
                 torch.nn.BatchNorm1d(out_dim),
                 torch.nn.ReLU(),
-                torch.nn.Linear(out_dim, out_dim)
+                torch.nn.Linear(out_dim, out_dim),
             )
 
         # Layer 1: Project from Input (128) to Output (128)
         self.conv1 = GINEConv(make_mlp(in_channels, out_channels), edge_dim=4)
-        
+
         # Layer 2: Keep dims constant (128 -> 128)
         self.conv2 = GINEConv(make_mlp(out_channels, out_channels), edge_dim=4)
-        
+
         # Layer 3
         self.conv3 = GINEConv(make_mlp(out_channels, out_channels), edge_dim=4)
-        
+
         # Layer 4
         self.conv4 = GINEConv(make_mlp(out_channels, out_channels), edge_dim=4)
 
@@ -316,8 +314,10 @@ class GraphSiameseNetwork_v3(GraphSiameseNetworkBase):
         x_scalar = molecule_data.x[:, 3:].float()
 
         molecule_embedding = self.atom_encoder(x_cat, x_scalar)
-        molecule_embedding, att_edge_index, att_weights = self.molecule_encoder.forward_with_attention(
-            molecule_embedding, molecule_data.edge_index, molecule_data.edge_attr
+        molecule_embedding, att_edge_index, att_weights = (
+            self.molecule_encoder.forward_with_attention(
+                molecule_embedding, molecule_data.edge_index, molecule_data.edge_attr
+            )
         )
 
         return molecule_embedding, att_edge_index, att_weights
@@ -344,18 +344,38 @@ class GraphSiameseNetwork_v4(GraphSiameseNetworkBase):
             out_channels=out_channels,
         )
     
-    def encode_molecule(self, molecule_data: Data) -> torch.Tensor:
-        x_cat = molecule_data.x[:, :3].long()
-        x_scalar = molecule_data.x[:, 3:].float()
+    def encode_molecule_inner(
+        self, 
+        x_embed: torch.Tensor, 
+        edge_index: torch.Tensor, 
+        edge_attr: torch.Tensor, 
+        batch: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Internal helper: Runs GNN + Pooling on pre-computed embeddings.
+        """
+        # 1. GINE Convolutions
+        x = self.molecule_encoder(x_embed, edge_index, edge_attr)
 
-        molecule_embedding = self.atom_encoder(x_cat, x_scalar)
-        molecule_embedding = self.molecule_encoder(molecule_embedding, molecule_data.edge_index, molecule_data.edge_attr)
-
-        v_sum = global_add_pool(molecule_embedding, molecule_data.batch)
-        v_max = global_max_pool(molecule_embedding, molecule_data.batch)
+        # 2. Pooling
+        v_sum = global_add_pool(x, batch)
+        v_max = global_max_pool(x, batch)
 
         return torch.cat([v_sum, v_max], dim=1)
 
+    def encode_molecule(self, molecule_data: Data) -> torch.Tensor:
+        # 1. Atom Encoder
+        x_cat = molecule_data.x[:, :3].long()
+        x_scalar = molecule_data.x[:, 3:].float()
+        molecule_embedding = self.atom_encoder(x_cat, x_scalar)
+
+        # 2. Inner GNN + Pooling
+        return self.encode_molecule_inner(
+            molecule_embedding, 
+            molecule_data.edge_index, 
+            molecule_data.edge_attr, 
+            molecule_data.batch
+        )
 
 # --- VERSION 5 (GINEConv Encoder, Rich Atoms + Bond Attributes) + Fingerprints Model ---
 class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
@@ -374,38 +394,58 @@ class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
             molecule_embedding_dim=molecule_embedding_dim,
         )
 
-        # Current GNN Output: (Protein Sum+Max) + (Molecule Sum+Max)
-        # Protein: 128 * 2 = 256
-        # Molecule: 128 * 2 = 256
         gnn_output_dim = out_channels * 4
-        
-        # New Total Input
-        total_input_dim = gnn_output_dim + fingerprints_model_dim # 512 + 2052 = 2564
+        total_input_dim = gnn_output_dim + fingerprints_model_dim 
         
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(total_input_dim, 1024),
-            torch.nn.BatchNorm1d(1024), # Essential for mixing distinct feature types
+            torch.nn.BatchNorm1d(1024),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),      # High dropout to prevent overfitting on the large fingerprint
-            
+            torch.nn.Dropout(0.3),
             torch.nn.Linear(1024, 512),
             torch.nn.BatchNorm1d(512),
             torch.nn.ReLU(),
             torch.nn.Dropout(0.2),
-            
             torch.nn.Linear(512, 1)
         )
 
     def forward(self, protein_data: Data, molecule_data: Data) -> torch.Tensor:
+        # Standard forward pass
         prot_vec = self.encode_protein(protein_data)
         mol_vec = self.encode_molecule(molecule_data)
 
         if prot_vec.shape[0] != mol_vec.shape[0]:
             prot_vec = prot_vec.expand(mol_vec.shape[0], -1)
 
-        #retrieve expert features - molecule_data.expert_features is [Batch, 1, 2052]
         expert_features = molecule_data.expert_features.squeeze(1)
+        combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
+        return self.mlp(combined)
+
+    def forward_from_embeddings(
+        self, 
+        mol_embed: torch.Tensor, 
+        molecule_data: Data, 
+        protein_data: Data
+    ) -> torch.Tensor:
+        """
+        Special Forward Pass for Gradient/Design Scripts.
+        Takes PRE-COMPUTED molecule embeddings (with gradients enabled)
+        and runs the rest of the network.
+        """
+        # 1. Run Molecule GNN (using the hooked embeddings)
+        mol_vec = self.encode_molecule_inner(
+            mol_embed, 
+            molecule_data.edge_index, 
+            molecule_data.edge_attr, 
+            molecule_data.batch
+        )
         
-        #concatenate [Batch, 256 + 256 + 2052]
+        # 2. Run Protein GNN (Standard)
+        prot_vec = self.encode_protein(protein_data)
+        if prot_vec.shape[0] != mol_vec.shape[0]:
+            prot_vec = prot_vec.expand(mol_vec.shape[0], -1)
+
+        # 3. Expert Features & MLP
+        expert_features = molecule_data.expert_features.squeeze(1)
         combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
         return self.mlp(combined)
