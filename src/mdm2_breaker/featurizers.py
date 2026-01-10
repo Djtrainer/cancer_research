@@ -442,6 +442,7 @@ class SmallMoleculeFeaturizer_v3(SmallMoleculeFeaturizerBase):
 
 # --- VERSION 5 (Rich Atoms + Bond Attributes + Fingerprints Model) ---
 class SmallMoleculeFeaturizer_v5(SmallMoleculeFeaturizer_v3):
+
     @property
     def processed_file_names(self):
         return ["mdm2_graphs_v5.pt"]
@@ -513,3 +514,65 @@ class SmallMoleculeFeaturizer_v5(SmallMoleculeFeaturizer_v3):
 
         # 3. Save to disk
         self._save_data(data_list, df, mean, std)
+
+    def _featurize_mol(self, mol):
+        """
+        Core logic: Takes RDKit Mol -> Returns PyG Data components
+        """
+        # --- A. GRAPH FEATURES (Nodes & Edges) ---
+        atom_feats = []
+        for atom in mol.GetAtoms():
+            cats, floats = self._get_atom_feature(atom)
+            atom_feats.append(cats + floats)
+        x = torch.tensor(atom_feats, dtype=torch.float)
+
+        row_idx, col_idx, bond_feats = [], [], []
+        for bond in mol.GetBonds():
+            start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+            bf = self._get_bond_feature(bond)
+            row_idx += [start, end]
+            col_idx += [end, start]
+            bond_feats += [bf, bf]
+        fp_gen = Chem.rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+
+        # --- B. EXPERT FEATURES ---
+        fp = fp_gen.GetFingerprintAsNumPy(mol)
+
+        # EXACT MATCH of your V5 Logic (Don't change these constants!)
+        descriptors = np.array(
+            [
+                Descriptors.MolWt(mol) * 0.001,
+                Descriptors.MolLogP(mol) * 0.1,
+                Descriptors.TPSA(mol) * 0.01,
+                Descriptors.NumHDonors(mol) * 0.1,
+            ],
+            dtype=np.float32,
+        )
+
+        expert_vec = np.concatenate([fp, descriptors])
+
+        return x, row_idx, col_idx, bond_feats, expert_vec
+
+    def featurize_smiles(self, smiles):
+        """
+        Public method for Design/Inference scripts.
+        """
+        mol = Chem.MolFromSmiles(smiles)
+        # Note: Your training data might have explicit hydrogens.
+        # If your AtomEncoder relies on H-counts, AddHs is safer.
+        # But if your V5 training loop didn't use AddHs(), don't use it here!
+        # Assuming standard V5 didn't force AddHs:
+
+        if mol is None:
+            return None
+
+        x, row, col, bond_attr, expert = self._featurize_mol(mol)
+
+        # Wrap in Data object (No y label needed for inference)
+        data = Data(
+            x=x,
+            edge_index=torch.tensor([row, col], dtype=torch.long),
+            edge_attr=torch.tensor(bond_attr, dtype=torch.float),
+            expert_features=torch.tensor([expert], dtype=torch.float),  # [1, 2052]
+        )
+        return data
