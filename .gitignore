@@ -16,3 +16,7 @@ notebooks/lightning_logs/*
 notebooks/checkpoints/*
 plan.md
 reading_list.md
+notebooks/vina_benchmark/*
+notebooks/vina_results.csv
+result/*
+runs/*

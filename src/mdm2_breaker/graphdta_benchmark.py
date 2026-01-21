@@ -1,0 +1,96 @@
+import numpy as np
+import pandas as pd
+from DeepPurpose import utils, DTI
+import os
+from pathlib import Path
+from sklearn.metrics import mean_squared_error, r2_score
+from rdkit import Chem
+
+mol_file = os.path.join(
+    "data", "MDM2_Breaker", "raw", "bindingdb_p53_binding_protein_mdm2.tsv"
+)
+print(f"mol_file: {mol_file}")
+BENCHMARK_DATA_PATH = os.path.join('data', 'MDM2_Breaker', 'processed', 'benchmark_data.csv')
+print(f"BENCHMARK_DATA_PATH: {BENCHMARK_DATA_PATH}")
+df_mol = pd.read_csv(BENCHMARK_DATA_PATH)
+print(f"df_mol: {df_mol.head()}")
+
+print(f"Original data size: {len(df_mol)}")
+
+def is_valid_molecule(smiles):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        return mol is not None
+    except:
+        return False
+
+# Drop rows with invalid SMILES
+df_mol = df_mol[df_mol['SMILES'].apply(is_valid_molecule)]
+
+print(f"Sanitized data size: {len(df_mol)}")
+
+train_indices = df_mol[df_mol['split'] == 'train'].index
+val_indices = df_mol[df_mol['split'] == 'val'].index
+test_indices = df_mol[df_mol['split'] == 'test'].index
+print(f"train_indices: {train_indices}")
+print(f"val_indices: {val_indices}")
+print(f"test_indices: {test_indices}")
+# Define the MDM2 Sequence (Standardized)
+MDM2_SEQUENCE = "SQIPASEQETLVRPKPLLLKLLKSVGAQKDTYTMKEVLFYLGQYIMTKRLYDEKQQHIVYCSNDLLGDLFGVPSFSVKEHRKIYTMIYRNLVVVNQQESSDSGTSVSEN"
+
+# 2. Use this function to generate the 3 lists required
+def prepare_data_for_graphdta(df, indices, target_seq):
+    subset = df.loc[indices]
+    
+    X_drugs = subset['SMILES'].tolist()           # 1. Drug (SMILES)
+    y = subset['pIC50'].tolist()                  # 2. Label (pIC50)
+    X_targets = [target_seq] * len(X_drugs)       # 3. Target (Repeated Sequence)
+    
+    return X_drugs, X_targets, y
+
+# 3. Call it for each split
+print("Preparing Data...")
+X_train, T_train, y_train = prepare_data_for_graphdta(df_mol, train_indices, MDM2_SEQUENCE)
+X_val, T_val, y_val = prepare_data_for_graphdta(df_mol, val_indices, MDM2_SEQUENCE)
+X_test, T_test, y_test = prepare_data_for_graphdta(df_mol, test_indices, MDM2_SEQUENCE)
+
+print(f"Data ready: {len(X_train)} Train, {len(X_val)} Val, {len(X_test)} Test")
+
+# 3. Encode (The Heavy Lifting)
+drug_encoding = 'DGL_GCN' # The standard GraphDTA graph encoder
+target_encoding = 'CNN'   # The standard 1D protein encoder
+
+train_data = utils.data_process(X_drug=X_train, X_target=T_train, y=y_train, 
+                                drug_encoding=drug_encoding, target_encoding=target_encoding, 
+                                split_method='no_split')
+
+val_data = utils.data_process(X_drug=X_val, X_target=T_val, y=y_val, 
+                              drug_encoding=drug_encoding, target_encoding=target_encoding, 
+                              split_method='no_split')
+
+test_data = utils.data_process(X_drug=X_test, X_target=T_test, y=y_test, 
+                               drug_encoding=drug_encoding, target_encoding=target_encoding, 
+                               split_method='no_split')
+
+# 4. Train
+config = utils.generate_config(drug_encoding=drug_encoding, 
+                               target_encoding=target_encoding, 
+                               cls_hidden_dims=[1024, 1024, 512], 
+                               train_epoch=30, # 30 is usually enough for convergence
+                               LR=0.001, 
+                               batch_size=128)
+
+model = DTI.model_initialize(**config)
+
+print("Starting Training...")
+model.train(train_data, val_data, test_data)
+
+# 5. Get The Final Number
+print("\n--- Final Test Performance ---")
+y_pred = model.predict(test_data)
+df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
+df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results.csv'), index=False)
+
+# DeepPurpose prints MSE/Pearson automatically, but let's be sure
+print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
+print(f"R2: {r2_score(y_test, y_pred):.4f}")
