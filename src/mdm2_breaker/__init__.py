@@ -10,5 +10,7 @@ from .models import (
     GraphSiameseNetwork_v2,
     GraphSiameseNetwork_v3,
     GraphSiameseNetwork_v4,
-    GraphSiameseNetwork_v5
+    GraphSiameseNetwork_v5,
+    ProteinSequenceEncoder,
+    SequenceSiameseNetwork,
 )

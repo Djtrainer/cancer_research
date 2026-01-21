@@ -377,6 +377,7 @@ class GraphSiameseNetwork_v4(GraphSiameseNetworkBase):
             molecule_data.batch
         )
 
+
 # --- VERSION 5 (GINEConv Encoder, Rich Atoms + Bond Attributes) + Fingerprints Model ---
 class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
     def __init__(
@@ -447,5 +448,118 @@ class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
 
         # 3. Expert Features & MLP
         expert_features = molecule_data.expert_features.squeeze(1)
+        combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
+        return self.mlp(combined)
+
+
+# --- GraphDTA-style 1D CNN for Protein Sequences ---
+class ProteinSequenceEncoder(torch.nn.Module):
+    def __init__(self, vocab_size=26, embedding_dim=128, output_dim=128):
+        """
+        A GraphDTA-style 1D CNN for Protein Sequences.
+        
+        Args:
+            vocab_size: Number of unique amino acids (usually ~20-25 + padding).
+            embedding_dim: Size of the learnable character embedding.
+            output_dim: Final vector size (MUST match your Ligand Encoder output).
+        """
+        super().__init__()
+        
+        # 1. Embedding Layer (Maps 'A' to a vector)
+        self.embedding = torch.nn.Embedding(vocab_size, embedding_dim)
+        
+        # 2. CNN Layers (Finding motifs like 'L-X-X-L')
+        # GraphDTA typically uses 3 convolution blocks
+        self.conv1 = torch.nn.Conv1d(in_channels=embedding_dim, out_channels=32, kernel_size=8)
+        self.conv2 = torch.nn.Conv1d(in_channels=32, out_channels=64, kernel_size=8)
+        self.conv3 = torch.nn.Conv1d(in_channels=64, out_channels=output_dim, kernel_size=8)
+        
+        # 3. Global Pooling (Condense the whole sequence to one vector)
+        self.fc1 = torch.nn.Linear(output_dim, output_dim)
+
+    def forward(self, x):
+        # x shape: [batch_size, seq_len] (Indices)
+        
+        # Embed: [batch, seq_len, emb_dim] -> [batch, emb_dim, seq_len] for Conv1d
+        x = self.embedding(x).permute(0, 2, 1)
+        
+        # Block 1
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = F.max_pool1d(x, kernel_size=2) # Downsample
+        
+        # Block 2
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool1d(x, kernel_size=2)
+        
+        # Block 3
+        x = self.conv3(x)
+        x = F.relu(x)
+        # Global Max Pooling (Take the strongest signal from the whole protein)
+        x = F.adaptive_max_pool1d(x, 1).squeeze(2)
+        
+        # Final Projection
+        x = self.fc1(x)
+        return x
+
+
+# --- GraphDTA-style Siamese Network 
+# (GINEConv Encoder, Rich Atoms + Bond Attributes) + Protein Sequence Encoder ---
+class SequenceSiameseNetwork(torch.nn.Module):
+    def __init__(
+        self, 
+        molecule_encoder: torch.nn.Module,   
+        sequence_encoder: torch.nn.Module,   
+        fingerprints_dim: int = 2052,
+        molecule_out_dim: int = 256,   
+        protein_out_dim: int = 128,    
+        mlp_hidden_dim: int = 1024
+    ):
+        super().__init__()
+        
+        # 1. The Components
+        self.molecule_encoder = molecule_encoder
+        self.protein_encoder = sequence_encoder
+        
+        # 2. The MLP (Replicating v5 architecture exactly for fairness)
+        # Input = Protein_Vec + Molecule_Vec + Fingerprints
+        total_input_dim = protein_out_dim + molecule_out_dim + fingerprints_dim
+        
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(total_input_dim, mlp_hidden_dim),
+            torch.nn.BatchNorm1d(mlp_hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.3),
+            torch.nn.Linear(mlp_hidden_dim, 512),
+            torch.nn.BatchNorm1d(512),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.2),
+            torch.nn.Linear(512, 1)
+        )
+
+    def forward(self, protein_indices, molecule_data):
+        """
+        protein_indices: [Batch, Seq_Len] (Integer Tensor)
+        molecule_data: PyG Data Object
+        """
+        
+        # 1. Encode Protein (Sequence)
+        # Output: [Batch, 128]
+        prot_vec = self.protein_encoder(protein_indices)
+        
+        # 2. Encode Molecule (Graph) - Using your existing v5 logic
+        # Output: [Batch, 256] (Sum + Max pool)
+        mol_vec = self.molecule_encoder(molecule_data) 
+        
+        # 3. Handle Batch Expansion (if using Siamese pairs)
+        if prot_vec.shape[0] != mol_vec.shape[0]:
+             # Assuming 1 Protein vs Many Ligands (Broadcasting)
+            prot_vec = prot_vec.expand(mol_vec.shape[0], -1)
+
+        # 4. Expert Features (Fingerprints) - Critical to keep v5 parity
+        expert_features = molecule_data.expert_features.squeeze(1)
+        
+        # 5. Combine & Predict
         combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
         return self.mlp(combined)
