@@ -27,7 +27,27 @@ def is_valid_molecule(smiles):
 # Drop rows with invalid SMILES
 df_mol = df_mol[df_mol['SMILES'].apply(is_valid_molecule)]
 
-print(f"Sanitized data size: {len(df_mol)}")
+def sanitize_and_flatten(smiles):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return None
+        
+        # CRITICAL FIX: Remove the "Wedge/Dash" bond directions
+        # This prevents the 'BEGINDASH' error in DGL-LifeSci
+        Chem.RemoveStereochemistry(mol)
+        
+        # Return the canonical, flattened SMILES
+        return Chem.MolToSmiles(mol)
+    except:
+        return None
+
+# 1. Apply the cleaner
+df_mol['SMILES'] = df_mol['SMILES'].apply(sanitize_and_flatten)
+# 2. Drop rows that failed (became None)
+df_mol = df_mol.dropna(subset=['SMILES'])
+print(f"Sanitized & Flattened data size: {len(df_mol)}")
+
 
 train_indices = df_mol[df_mol['split'] == 'train'].index
 val_indices = df_mol[df_mol['split'] == 'val'].index
@@ -57,7 +77,7 @@ X_test, T_test, y_test = prepare_data_for_graphdta(df_mol, test_indices, MDM2_SE
 print(f"Data ready: {len(X_train)} Train, {len(X_val)} Val, {len(X_test)} Test")
 
 # 3. Encode (The Heavy Lifting)
-drug_encoding = 'DGL_GCN' # The standard GraphDTA graph encoder
+drug_encoding = 'DGL_GIN_AttrMasking' # The standard GraphDTA graph encoder
 target_encoding = 'CNN'   # The standard 1D protein encoder
 
 train_data = utils.data_process(X_drug=X_train, X_target=T_train, y=y_train, 
@@ -89,7 +109,7 @@ model.train(train_data, val_data, test_data)
 print("\n--- Final Test Performance ---")
 y_pred = model.predict(test_data)
 df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
-df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results.csv'), index=False)
+df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results_gin_attr_masking.csv'), index=False)
 
 # DeepPurpose prints MSE/Pearson automatically, but let's be sure
 print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")

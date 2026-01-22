@@ -20,11 +20,11 @@ class GCNEncoder(torch.nn.Module):
         self.conv3 = GCNConv(out_channels * 4, out_channels * 2)
         self.conv4 = GCNConv(out_channels * 2, out_channels)
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        x = F.leaky_relu(self.conv1(x, edge_index))
-        x = F.leaky_relu(self.conv2(x, edge_index))
-        x = F.leaky_relu(self.conv3(x, edge_index))
-        x = self.conv4(x, edge_index)
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor) -> torch.Tensor:
+        x = F.leaky_relu(self.conv1(x, edge_index, edge_attr))
+        x = F.leaky_relu(self.conv2(x, edge_index, edge_attr))
+        x = F.leaky_relu(self.conv3(x, edge_index, edge_attr))
+        x = self.conv4(x, edge_index, edge_attr)
         return x
 
 
@@ -331,6 +331,7 @@ class GraphSiameseNetwork_v4(GraphSiameseNetworkBase):
         molecule_in_channels: int = 128,
         out_channels: int = 128,
         molecule_embedding_dim: int = 64,
+        molecular_encoding_type: str = 'gin',
     ):
         super(GraphSiameseNetwork_v4, self).__init__(
             protein_in_channels=protein_in_channels,
@@ -339,10 +340,23 @@ class GraphSiameseNetwork_v4(GraphSiameseNetworkBase):
             molecule_embedding_dim=molecule_embedding_dim,
         )
         self.atom_encoder = AtomEncoder(embedding_dim=molecule_embedding_dim)
-        self.molecule_encoder = GINEEncoder(
-            in_channels=molecule_in_channels,
-            out_channels=out_channels,
-        )
+        if molecular_encoding_type == 'gin':
+            self.molecule_encoder = GINEEncoder(
+                in_channels=molecule_in_channels,
+                out_channels=out_channels,
+            )
+        elif molecular_encoding_type == 'gcn':
+            self.molecule_encoder = GCNEncoder(
+                in_channels=molecule_in_channels,
+                out_channels=out_channels,
+            )
+        elif molecular_encoding_type == 'gat':
+            self.molecule_encoder = GatCNEncoder(
+                in_channels=molecule_in_channels,
+                out_channels=out_channels,
+            )
+        else:
+            raise ValueError(f"Invalid molecular encoding type: {molecular_encoding_type}")
     
     def encode_molecule_inner(
         self, 
@@ -387,12 +401,14 @@ class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
         out_channels: int = 128,
         molecule_embedding_dim: int = 64,
         fingerprints_model_dim: int = 2052,
+        molecular_encoding_type: str = 'gin',
     ):
         super(GraphSiameseNetwork_v5, self).__init__(
             protein_in_channels=protein_in_channels,
             molecule_in_channels=molecule_in_channels,
             out_channels=out_channels,
             molecule_embedding_dim=molecule_embedding_dim,
+            molecular_encoding_type=molecular_encoding_type,
         )
 
         gnn_output_dim = out_channels * 4
@@ -524,7 +540,8 @@ class SequenceSiameseNetwork(torch.nn.Module):
         
         # 2. The MLP (Replicating v5 architecture exactly for fairness)
         # Input = Protein_Vec + Molecule_Vec + Fingerprints
-        total_input_dim = protein_out_dim + molecule_out_dim + fingerprints_dim
+        # total_input_dim = protein_out_dim + molecule_out_dim + fingerprints_dim   
+        total_input_dim = protein_out_dim + molecule_out_dim
         
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(total_input_dim, mlp_hidden_dim),
@@ -558,8 +575,9 @@ class SequenceSiameseNetwork(torch.nn.Module):
             prot_vec = prot_vec.expand(mol_vec.shape[0], -1)
 
         # 4. Expert Features (Fingerprints) - Critical to keep v5 parity
-        expert_features = molecule_data.expert_features.squeeze(1)
+        # expert_features = molecule_data.expert_features.squeeze(1)
         
         # 5. Combine & Predict
-        combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
+        # combined = torch.cat([prot_vec, mol_vec, expert_features], dim=1)
+        combined = torch.cat([prot_vec, mol_vec], dim=1)
         return self.mlp(combined)

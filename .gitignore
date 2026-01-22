@@ -20,3 +20,4 @@ notebooks/vina_benchmark/*
 notebooks/vina_results.csv
 result/*
 runs/*
+*.pth
