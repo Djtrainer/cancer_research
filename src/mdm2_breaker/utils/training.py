@@ -110,7 +110,7 @@ def define_trainer(
     )
 
     # Early Stopping: Stop if val_loss doesn't improve for 10 epochs
-    early_stop_cb = EarlyStopping(monitor="val_loss", patience=10, mode="min")
+    early_stop_cb = EarlyStopping(monitor="val_loss", patience=100, mode="min")
 
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
 

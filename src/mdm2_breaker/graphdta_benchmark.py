@@ -114,15 +114,15 @@ print(network)
 total_params = sum(p.numel() for p in network.parameters() if p.requires_grad)
 print(f"\nTotal Trainable Parameters: {total_params:,}")
 print("======================================\n")
-# print("Starting Training...")
-# model.train(train_data, val_data, test_data)
+print("Starting Training...")
+model.train(train_data, val_data, test_data)
 
-# # 5. Get The Final Number
-# print("\n--- Final Test Performance ---")
-# y_pred = model.predict(test_data)
-# df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
-# df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results_gin_attr_masking.csv'), index=False)
+# 5. Get The Final Number
+print("\n--- Final Test Performance ---")
+y_pred = model.predict(test_data)
+df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
+df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results_gin_attr_masking.csv'), index=False)
 
-# # DeepPurpose prints MSE/Pearson automatically, but let's be sure
-# print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
-# print(f"R2: {r2_score(y_test, y_pred):.4f}")
+# DeepPurpose prints MSE/Pearson automatically, but let's be sure
+print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
+print(f"R2: {r2_score(y_test, y_pred):.4f}")

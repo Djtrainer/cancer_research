@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
+
+# standard imports
 import torch
 from Bio.PDB import PDBParser
 from dgllife.utils import CanonicalAtomFeaturizer
@@ -319,7 +321,7 @@ class SmallMoleculeFeaturizer_v3(SmallMoleculeFeaturizerBase):
         self.file_path = file_path
         self.test = test
 
-        super().__init__(root, transform, pre_transform)
+        super().__init__(root, file_path, transform, pre_transform)
 
         # Load the DF into memory permanently
         self.df = self._load_df()
@@ -506,7 +508,7 @@ class SmallMoleculeFeaturizer_v5(SmallMoleculeFeaturizer_v3):
                 x=x,
                 edge_index=torch.tensor([row_idx, col_idx], dtype=torch.long),
                 edge_attr=torch.tensor(bond_feats, dtype=torch.float),
-                y=torch.tensor([row["pIC50_norm"]], dtype=torch.float),
+                y=torch.tensor([row["pIC50"]], dtype=torch.float),
                 # IMPORTANT: Store as [1, 2052] so it has a batch dimension
                 expert_features=torch.tensor([expert_vec], dtype=torch.float),
             )
@@ -580,81 +582,79 @@ class SmallMoleculeFeaturizer_v5(SmallMoleculeFeaturizer_v3):
 
 class SmallMoleculeFeaturizer_DeepPurpose(SmallMoleculeFeaturizer_v3):
     """
-    Retrofitted Featurizer that matches DeepPurpose's GraphDTA logic.
-    - Node Features: 74 (CanonicalAtomFeaturizer)
-    - Edge Features: None (Connectivity only, as GCN ignores edge attributes)
-    - Expert Features: Removed (to match baseline)
+    Official DGL Implementation.
+    - Uses dgllife.utils.CanonicalAtomFeaturizer for exact 74-dim features.
+    - Matches DeepPurpose 'DGL_GCN' encoding.
     """
 
-    def __init__(self, root, filename="mdm2_graphs_dp.pt"):
-        # Initialize the DGL backend once
-        self.backend = CanonicalAtomFeaturizer()
-        super().__init__(root, filename)
+    def __init__(self, root, file_path, test=False, transform=None, pre_transform=None):
+        # Initialize the DGL Featurizer
+        # atom_data_field='h' tells it to store features in the 'h' key
+        self.backend = CanonicalAtomFeaturizer(atom_data_field="h")
+
+        # Initialize Parent
+        super().__init__(root, file_path, test, transform, pre_transform)
 
     @property
     def processed_file_names(self):
-        # Save to a new file so we don't overwrite your v5 data
-        return ["mdm2_graphs_dp.pt"]
+        # We name it _dgl to distinguish from the RDKit workaround version
+        return ["mdm2_graphs_dgl.pt"]
 
     def process(self):
-        # 1. Load & Clean (Shared logic from Base)
+        # 1. Load & Clean (Shared logic)
         df, mean, std = self._load_and_clean_df()
-
         data_list = []
 
         for _, row in tqdm(
-            df.iterrows(), total=len(df), desc="Processing DeepPurpose Features"
+            df.iterrows(), total=len(df), desc="Processing DeepPurpose (DGL)"
         ):
             mol = Chem.MolFromSmiles(row["SMILES"])
             if mol is None:
                 continue
 
-            # --- A. GRAPH FEATURES (DeepPurpose Logic) ---
+            # --- A. GRAPH FEATURES VIA DGL ---
             try:
-                # 1. Nodes: CanonicalAtomFeaturizer (74 dim)
-                # Returns dict {'h': tensor}
-                node_feats = self.backend(mol)["h"]
-                x = node_feats.float()
+                # 1. Nodes: Use DGL Backend
+                # returns a dict: {'h': tensor_of_shape_N_74}
+                feats_dict = self.backend(mol)
+                x = feats_dict["h"].float()
 
-                # 2. Edges: Connectivity Only
-                # DeepPurpose GCN uses just the adjacency matrix, no edge attributes
+                # 2. Edges: Connectivity Only (Standard RDKit Adjacency)
+                # DeepPurpose GCN does not use edge features
                 adj = Chem.GetAdjacencyMatrix(mol)
                 edge_index = torch.tensor(adj).nonzero(as_tuple=False).t().contiguous()
 
             except Exception as e:
-                print(f"Skipping SMILES {row['SMILES']} due to error: {e}")
+                print(f"DGL Featurization failed for {row['SMILES']}: {e}")
                 continue
 
-            # --- B. PACK EVERYTHING ---
+            # --- B. PACK ---
             data = Data(
-                x=x,  # Shape: [Num_Atoms, 74]
-                edge_index=edge_index.long(),  # Shape: [2, Num_Edges]
+                x=x,
+                edge_index=edge_index.long(),
                 y=torch.tensor([row["pIC50_norm"]], dtype=torch.float),
-                # Note: We deliberately EXCLUDE expert_features and edge_attr
-                # because the DeepPurpose GCN benchmark does not use them.
             )
             data_list.append(data)
 
-        # 3. Save to disk
         self._save_data(data_list, df, mean, std)
 
     def featurize_smiles(self, smiles):
         """
-        Public method for Design/Inference scripts.
+        Public method for Design/Inference.
         """
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
 
-        # 1. Nodes (74 dim)
-        node_feats = self.backend(mol)["h"]
-        x = node_feats.float()
+        # 1. Nodes via DGL
+        feats_dict = self.backend(mol)
+        x = feats_dict["h"].float()
 
-        # 2. Edges (Connectivity)
+        # 2. Edges
         adj = Chem.GetAdjacencyMatrix(mol)
         edge_index = torch.tensor(adj).nonzero(as_tuple=False).t().contiguous()
 
-        # Wrap in Data object
+        # Wrap
         data = Data(
             x=x,
             edge_index=edge_index.long(),

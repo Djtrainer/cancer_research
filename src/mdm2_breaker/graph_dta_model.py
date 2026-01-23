@@ -14,23 +14,20 @@ class DeepPurposeGCNLayer(nn.Module):
         super().__init__()
         self.conv = GCNConv(in_channels, out_channels)
         self.bn = nn.BatchNorm1d(out_channels)
-
-        # Residual Connection
-        # If dims change, we need to project x to match output size
-        if in_channels != out_channels:
-            self.res_projection = nn.Linear(in_channels, out_channels)
-        else:
-            self.res_projection = nn.Identity()
+        
+        # FIX: DeepPurpose ALWAYS uses a Linear projection for the residual,
+        # even if dimensions are the same. This adds learnable parameters.
+        self.res_projection = nn.Linear(in_channels, out_channels)
 
     def forward(self, x, edge_index):
         # 1. Main Path
         out = self.conv(x, edge_index)
         out = self.bn(out)
         out = F.relu(out)
-
-        # 2. Residual Path
+        
+        # 2. Residual Path (Projected)
         res = self.res_projection(x)
-
+        
         return out + res
 
 
