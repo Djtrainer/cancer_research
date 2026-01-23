@@ -37,6 +37,8 @@ dependencies = [
     "tqdm==4.67.1",
     "wandb==0.21.0",
     "xgboost==3.0.2",
+    "dgl",
+    "dgllife",
 ]
 
 [tool.setuptools]

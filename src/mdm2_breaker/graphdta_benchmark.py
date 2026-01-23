@@ -77,7 +77,8 @@ X_test, T_test, y_test = prepare_data_for_graphdta(df_mol, test_indices, MDM2_SE
 print(f"Data ready: {len(X_train)} Train, {len(X_val)} Val, {len(X_test)} Test")
 
 # 3. Encode (The Heavy Lifting)
-drug_encoding = 'DGL_GIN_AttrMasking' # The standard GraphDTA graph encoder
+drug_encoding = 'DGL_GCN' # The standard GraphDTA graph encoder
+# drug_encoding = 'DGL_GIN_AttrMasking' # The standard GraphDTA graph encoder
 target_encoding = 'CNN'   # The standard 1D protein encoder
 
 train_data = utils.data_process(X_drug=X_train, X_target=T_train, y=y_train, 
@@ -102,15 +103,26 @@ config = utils.generate_config(drug_encoding=drug_encoding,
 
 model = DTI.model_initialize(**config)
 
-print("Starting Training...")
-model.train(train_data, val_data, test_data)
 
-# 5. Get The Final Number
-print("\n--- Final Test Performance ---")
-y_pred = model.predict(test_data)
-df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
-df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results_gin_attr_masking.csv'), index=False)
+# --- ARCHITECTURE INSPECTION ---
+network = model.model 
 
-# DeepPurpose prints MSE/Pearson automatically, but let's be sure
-print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
-print(f"R2: {r2_score(y_test, y_pred):.4f}")
+print("\n=== DEEPPURPOSE MODEL ARCHITECTURE ===")
+print(network) 
+
+# 2. Count parameters on the NETWORK, not the wrapper
+total_params = sum(p.numel() for p in network.parameters() if p.requires_grad)
+print(f"\nTotal Trainable Parameters: {total_params:,}")
+print("======================================\n")
+# print("Starting Training...")
+# model.train(train_data, val_data, test_data)
+
+# # 5. Get The Final Number
+# print("\n--- Final Test Performance ---")
+# y_pred = model.predict(test_data)
+# df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
+# df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results_gin_attr_masking.csv'), index=False)
+
+# # DeepPurpose prints MSE/Pearson automatically, but let's be sure
+# print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
+# print(f"R2: {r2_score(y_test, y_pred):.4f}")

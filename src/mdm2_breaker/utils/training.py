@@ -181,11 +181,12 @@ def train_model(
     save_name="sarcoma-model-{epoch:02d}-{val_loss:.2f}",
     train=True,
     mol_file=None,
+    batch_size=64,
 ):
     trainer = define_trainer(epochs=epochs, lr=lr, save_name=save_name)
 
     train_loader, val_loader, test_loader = generate_loaders(
-        mol_class, train_indices, val_indices, test_indices, mol_file=mol_file
+        mol_class, train_indices, val_indices, test_indices, mol_file=mol_file, batch_size=batch_size
     )
 
     system = SarcomaScoutSystem(model=model, protein_data=protein_data, lr=lr)

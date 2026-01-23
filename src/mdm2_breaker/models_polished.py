@@ -13,18 +13,14 @@ from torch_geometric.nn import (
 class GCNEncoder(torch.nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
         super(GCNEncoder, self).__init__()
-        self.conv1 = GCNConv(in_channels, out_channels * 8)
-        self.conv2 = GCNConv(out_channels * 8, out_channels * 4)
-        self.conv3 = GCNConv(out_channels * 4, out_channels * 2)
-        self.conv4 = GCNConv(out_channels * 2, out_channels)
+        self.conv1 = GCNConv(in_channels, out_channels)
+        self.conv2 = GCNConv(out_channels, out_channels)
 
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor = None
     ) -> torch.Tensor:
         x = F.leaky_relu(self.conv1(x, edge_index))
-        x = F.leaky_relu(self.conv2(x, edge_index))
-        x = F.leaky_relu(self.conv3(x, edge_index))
-        x = self.conv4(x, edge_index)
+        x = self.conv2(x, edge_index)
         return x
 
 
@@ -141,8 +137,8 @@ class GraphSiameseNetwork(torch.nn.Module):
         self,
         protein_in_channels: int = 20,
         molecule_in_channels: int = 9,
-        out_channels: int = 128,
-        molecule_embedding_dim: int = 64,
+        out_channels: int = 64,
+        molecule_embedding_dim: int = 32,
         fingerprints_model_dim: int = 2052,
         molecular_encoding_type: str = "gin",
     ):
@@ -150,8 +146,11 @@ class GraphSiameseNetwork(torch.nn.Module):
         self.protein_encoder = GCNEncoder(
             in_channels=protein_in_channels, out_channels=out_channels
         )
-        self.atom_encoder = AtomEncoder(embedding_dim=molecule_embedding_dim)
-        gnn_input_dim = self.atom_encoder.out_dim
+        # self.atom_encoder = AtomEncoder(embedding_dim=molecule_embedding_dim)
+        # gnn_input_dim = molecule_in_channels
+
+        self.atom_encoder = torch.nn.Linear(molecule_in_channels, out_channels)
+        gnn_input_dim = out_channels
 
         if molecular_encoding_type == "gin":
             self.molecule_encoder = GINEEncoder(
@@ -178,15 +177,19 @@ class GraphSiameseNetwork(torch.nn.Module):
         # total_input_dim = gnn_output_dim + fingerprints_model_dim
 
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(total_input_dim, 1024),
-            torch.nn.BatchNorm1d(1024),
+            torch.nn.Linear(total_input_dim, 2048),
+            torch.nn.BatchNorm1d(2048),
             torch.nn.ReLU(),
             torch.nn.Dropout(0.3),
+            torch.nn.Linear(2048, 1024),
+            torch.nn.BatchNorm1d(1024),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.2),
             torch.nn.Linear(1024, 512),
             torch.nn.BatchNorm1d(512),
             torch.nn.ReLU(),
             torch.nn.Dropout(0.2),
-            torch.nn.Linear(512, 1),
+            torch.nn.Linear(512, 1),   
         )
 
     def encode_protein(self, protein_data: Data) -> torch.Tensor:
@@ -225,9 +228,11 @@ class GraphSiameseNetwork(torch.nn.Module):
 
     def encode_molecule(self, molecule_data: Data) -> torch.Tensor:
         # 1. Atom Encoder
-        x_cat = molecule_data.x[:, :3].long()
-        x_scalar = molecule_data.x[:, 3:].float()
-        molecule_embedding = self.atom_encoder(x_cat, x_scalar)
+        # x_cat = molecule_data.x[:, :3].long()
+        # x_scalar = molecule_data.x[:, 3:].float()
+        # molecule_embedding = self.atom_encoder(x_cat, x_scalar)
+        x_raw = molecule_data.x.float()
+        molecule_embedding = F.relu(self.atom_encoder(x_raw))
 
         # 2. Inner GNN + Pooling
         return self.encode_molecule_inner(

@@ -4,6 +4,7 @@ from .featurizers import (
     SmallMoleculeFeaturizer_v2,
     SmallMoleculeFeaturizer_v3,
     SmallMoleculeFeaturizer_v5,
+    SmallMoleculeFeaturizer_DeepPurpose
 )
 from .models import (
     GraphSiameseNetwork_v1,
