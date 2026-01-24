@@ -8,6 +8,8 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
+    TQDMProgressBar,
+
 )
 
 from torch_geometric.data import Data
@@ -15,6 +17,21 @@ from torch_geometric.loader import DataLoader
 
 
 ROOT = Path(os.getcwd()).parents[0]
+
+
+class ScientificProgressBar(TQDMProgressBar):
+    def get_metrics(self, trainer, model):
+        # 1. Get the standard metrics dict
+        items = super().get_metrics(trainer, model)
+        
+        # 2. Find the 'lr' key and reformat it
+        # (We check multiple keys because sometimes it's 'lr', 'lr-Adam', etc.)
+        for key, value in items.items():
+            if "lr" in key.lower() and isinstance(value, (int, float)):
+                # Format: 1.23e-04
+                items[key] = f"{value:.2e}"
+                
+        return items
 
 
 class SarcomaScoutSystem(pl.LightningModule):
@@ -70,6 +87,14 @@ class SarcomaScoutSystem(pl.LightningModule):
 
         # 3. Loss
         loss = F.mse_loss(preds.squeeze(), molecule_data.y)
+        
+        # --- NEW: Get and Log LR ---
+        # Get the current LR from the optimizer
+        lr = self.optimizers().param_groups[0]['lr']
+        # Log it with prog_bar=True so it shows up in the console
+        self.log("lr", lr, prog_bar=True, batch_size=batch.num_graphs)
+        # ---------------------------
+
         self.log("train_loss", loss, prog_bar=True, batch_size=batch.num_graphs)
         return loss
 
@@ -84,8 +109,12 @@ class SarcomaScoutSystem(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=0.5, patience=3
-        )
+                optimizer, 
+                mode="min", 
+                factor=0.5,     # Cut LR by 50%
+                patience=5,     # Wait 5 epochs (instead of 3) to be sure it's a plateau
+                min_lr=1e-5     # Safety floor
+            )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
@@ -111,14 +140,14 @@ def define_trainer(
 
     # Early Stopping: Stop if val_loss doesn't improve for 10 epochs
     early_stop_cb = EarlyStopping(monitor="val_loss", patience=100, mode="min")
-
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    progress_bar = ScientificProgressBar()
 
     trainer = pl.Trainer(
         max_epochs=epochs,
         accelerator="cpu",
         devices=1,
-        callbacks=[checkpoint_cb, early_stop_cb, lr_monitor],
+        callbacks=[checkpoint_cb, early_stop_cb, lr_monitor, progress_bar],
         log_every_n_steps=10,
     )
 

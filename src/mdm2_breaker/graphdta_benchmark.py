@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from sklearn.metrics import mean_squared_error, r2_score
 from rdkit import Chem
+import matplotlib.pyplot as plt
 
 mol_file = os.path.join(
     "data", "MDM2_Breaker", "raw", "bindingdb_p53_binding_protein_mdm2.tsv"
@@ -63,7 +64,7 @@ def prepare_data_for_graphdta(df, indices, target_seq):
     subset = df.loc[indices]
     
     X_drugs = subset['SMILES'].tolist()           # 1. Drug (SMILES)
-    y = subset['pIC50'].tolist()                  # 2. Label (pIC50)
+    y = subset['pIC50_norm'].tolist()                  # 2. Label (pIC50)
     X_targets = [target_seq] * len(X_drugs)       # 3. Target (Repeated Sequence)
     
     return X_drugs, X_targets, y
@@ -116,6 +117,34 @@ print(f"\nTotal Trainable Parameters: {total_params:,}")
 print("======================================\n")
 print("Starting Training...")
 model.train(train_data, val_data, test_data)
+
+# Define a directory for the saved model
+save_path = os.path.join('models', 'MDM2_Breaker',  'DeepPurpose_Benchmark')
+
+# Create the directory if it doesn't exist
+os.makedirs(save_path, exist_ok=True)
+
+# Save the model architecture and weights
+model.save_model(save_path)
+print(f"\nModel successfully saved to: {save_path}")
+
+# --- NEW: SAVE LOSS PLOT ---
+plt.figure(figsize=(10, 6))
+plt.plot(model.train_losses, label='Training Loss', color='blue')
+plt.plot(model.val_losses, label='Validation Loss', color='red')
+plt.xlabel('Epochs')
+plt.ylabel('MSE Loss')
+plt.title('Training and Validation Loss')
+plt.legend()
+plt.grid(True, alpha=0.3)
+
+# Save plot to the same directory as the model
+plot_path = os.path.join(save_path, 'loss_curve.png')
+plt.savefig(plot_path, dpi=300)
+plt.close() # Close figure to free memory
+
+print(f"Loss plot saved to: {plot_path}")
+# ---------------------------
 
 # 5. Get The Final Number
 print("\n--- Final Test Performance ---")

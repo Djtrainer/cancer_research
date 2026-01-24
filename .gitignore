@@ -21,3 +21,4 @@ notebooks/vina_results.csv
 result/*
 runs/*
 *.pth
+paper_outline.md
