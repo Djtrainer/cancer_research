@@ -5,19 +5,12 @@ from torch_geometric.nn import GCNConv, GlobalAttention, global_max_pool
 
 
 class DeepPurposeGCNLayer(nn.Module):
-    """
-    Replicates the 'GCNLayer' from DeepPurpose/DGL.
-    Logic: Output = ReLU(BN(GCN(x))) + Residual(x)
-    """
-
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, dropout=0.0): # Added dropout arg
         super().__init__()
         self.conv = GCNConv(in_channels, out_channels)
         self.bn = nn.BatchNorm1d(out_channels)
-        
-        # FIX: DeepPurpose ALWAYS uses a Linear projection for the residual,
-        # even if dimensions are the same. This adds learnable parameters.
         self.res_projection = nn.Linear(in_channels, out_channels)
+        self.dropout_rate = dropout # Store it
 
     def forward(self, x, edge_index):
         # 1. Main Path
@@ -25,7 +18,10 @@ class DeepPurposeGCNLayer(nn.Module):
         out = self.bn(out)
         out = F.relu(out)
         
-        # 2. Residual Path (Projected)
+        # FIX: Apply Dropout here!
+        out = F.dropout(out, p=self.dropout_rate, training=self.training)
+        
+        # 2. Residual Path
         res = self.res_projection(x)
         
         return out + res
@@ -157,6 +153,19 @@ class GraphDTAModel(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(512, 1),
         )
+
+        self._init_weights()
+        
+    def _init_weights(self):
+        # Apply Xavier Uniform initialization to all Linear layers
+        # This is the "Gold Standard" for these types of networks
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, protein_input, molecule_data):
         """

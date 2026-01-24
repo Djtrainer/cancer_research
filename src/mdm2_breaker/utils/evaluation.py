@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.metrics import mean_squared_error, r2_score
 
 
 def get_metrics(model, data_loader, protein_graph):
@@ -21,8 +22,8 @@ def get_metrics(model, data_loader, protein_graph):
     y_true = np.concatenate(y_true).ravel()  # Force 1D array
 
     # 3. Calculate Correct MSE
-    mse = np.mean((y_pred - y_true) ** 2)
-    r2 = 1 - (np.sum((y_true - y_pred) ** 2) / np.sum((y_true - y_true.mean()) ** 2))
+    r2 = r2_score(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
 
     return mse, r2, y_pred, y_true
 
@@ -46,6 +47,7 @@ def plot_predictions(model, loaders, protein_graph, title):
         ax[idx].legend()
         ax[idx].grid(True, alpha=0.3)
     plt.suptitle(title)
+    plt.grid(True, alpha=0.3)
     plt.show()
 
 
@@ -53,7 +55,7 @@ def plot_xgboost_predictions(
     pred_train_mse_tuple, pred_val_mse_tuple, pred_test_mse_tuple
 ):
     _, ax = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
-    for idx, (y_pred, y_true, mse) in enumerate(
+    for idx, (y_pred, y_true, _) in enumerate(
         [pred_train_mse_tuple, pred_val_mse_tuple, pred_test_mse_tuple]
     ):
         ax[idx].scatter(y_pred, y_true, alpha=0.5)
@@ -61,10 +63,8 @@ def plot_xgboost_predictions(
         # Add a DIAGONAL line (Perfect Prediction) - Much more useful than the mean line
         m_min, m_max = min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())
         ax[idx].plot([m_min, m_max], [m_min, m_max], "k--", label="Perfect Fit")
-        r2 = 1 - (
-            np.sum((y_true - y_pred) ** 2) / np.sum((y_true - y_true.mean()) ** 2)
-        )
-
+        r2 = r2_score(y_true, y_pred)
+        mse = mean_squared_error(y_true, y_pred)
         if idx == 1:
             ax[idx].set_xlabel("Predicted pIC50")
         if idx == 0:
@@ -101,30 +101,40 @@ def plot_xgb_loss(xgb_model):
 
 def plot_loss(csv_path):
     df = pd.read_csv(csv_path)
-    fix, ax = plt.subplots(figsize=(10, 5))
+    
+    # Create the main figure and the primary axis (Left Y-axis for Loss)
+    fig, ax1 = plt.subplots(figsize=(10, 6))
 
-    df.plot(
-        x="step",
-        y="train_loss",
-        title="Training Loss",
-        ax=ax,
-        label="Training Loss",
-        color="blue",
-        legend=True,
-        style="-",
-    )
-    df.dropna(subset=["val_loss"]).plot(
-        x="step",
-        y="val_loss",
-        title="Validation Loss",
-        ax=ax,
-        label="Validation Loss",
-        color="red",
-        legend=True,
-        style="-o",
-    )
-    ax.set_xlabel("Step")
-    ax.set_ylabel("Loss")
-    ax.set_title("Training and Validation Loss")
-    ax.legend()
+    # 1. Plot Training Loss (Left Axis)
+    train_df = df.dropna(subset=["train_loss"])
+    ax1.plot(train_df["step"], train_df["train_loss"], label="Training Loss", color="blue", linestyle="-", alpha=0.7)
+    
+    # 2. Plot Validation Loss (Left Axis)
+    val_df = df.dropna(subset=["val_loss"])
+    ax1.plot(val_df["step"], val_df["val_loss"], label="Validation Loss", color="red", marker="o", linestyle="-")
+
+    ax1.set_xlabel("Step")
+    ax1.set_ylabel("Loss (MSE)", color="black")
+    ax1.tick_params(axis='y', labelcolor="black")
+    ax1.grid(True, alpha=0.3)
+
+    if "lr" in df.columns:
+        lr_df = df.dropna(subset=["lr"])
+    
+        # 3. Create a TWIN axis (Right Y-axis for Learning Rate)
+        ax2 = ax1.twinx()
+        # Plot LR in green on the right axis
+        ax2.plot(lr_df["step"], lr_df["lr"], label="Learning Rate", color="green", linestyle="--", alpha=0.8)
+        
+        ax2.set_ylabel("Learning Rate", color="green")
+        ax2.tick_params(axis='y', labelcolor="green")
+
+        # Set Title
+        plt.title("Training Dynamics: Loss & Learning Rate")
+        
+        # 4. Combined Legend (Merge handles from both axes)
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        lines_2, labels_2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper center")
+
     plt.show()

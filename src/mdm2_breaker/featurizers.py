@@ -9,7 +9,7 @@ import torch
 from Bio.PDB import PDBParser
 from dgllife.utils import CanonicalAtomFeaturizer
 from rdkit import Chem
-from rdkit.Chem import Descriptors
+from rdkit.Chem import Descriptors, rdmolops
 from torch_geometric.data import Data, InMemoryDataset
 from tqdm import tqdm
 
@@ -612,6 +612,7 @@ class SmallMoleculeFeaturizer_DeepPurpose(SmallMoleculeFeaturizer_v3):
             if mol is None:
                 continue
 
+            mol = self._get_largest_frag(mol)
             # --- A. GRAPH FEATURES VIA DGL ---
             try:
                 # 1. Nodes: Use DGL Backend
@@ -660,3 +661,15 @@ class SmallMoleculeFeaturizer_DeepPurpose(SmallMoleculeFeaturizer_v3):
             edge_index=edge_index.long(),
         )
         return data
+
+    @staticmethod
+    def _get_largest_frag(mol):
+        """
+        Removes salts/solvents by keeping only the largest organic fragment.
+        """
+        frags = rdmolops.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
+        if len(frags) > 1:
+            # Return the fragment with the most atoms
+            return max(frags, key=lambda m: m.GetNumAtoms())
+        return mol
+

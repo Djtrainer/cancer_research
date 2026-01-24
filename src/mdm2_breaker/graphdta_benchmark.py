@@ -128,29 +128,12 @@ os.makedirs(save_path, exist_ok=True)
 model.save_model(save_path)
 print(f"\nModel successfully saved to: {save_path}")
 
-# --- NEW: SAVE LOSS PLOT ---
-plt.figure(figsize=(10, 6))
-plt.plot(model.train_losses, label='Training Loss', color='blue')
-plt.plot(model.val_losses, label='Validation Loss', color='red')
-plt.xlabel('Epochs')
-plt.ylabel('MSE Loss')
-plt.title('Training and Validation Loss')
-plt.legend()
-plt.grid(True, alpha=0.3)
-
-# Save plot to the same directory as the model
-plot_path = os.path.join(save_path, 'loss_curve.png')
-plt.savefig(plot_path, dpi=300)
-plt.close() # Close figure to free memory
-
-print(f"Loss plot saved to: {plot_path}")
-# ---------------------------
 
 # 5. Get The Final Number
 print("\n--- Final Test Performance ---")
 y_pred = model.predict(test_data)
 df_results = pd.DataFrame({'SMILES': X_test, 'pIC50': y_test, 'pIC50_pred': y_pred})
-df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results_gin_attr_masking.csv'), index=False)
+df_results.to_csv(os.path.join('data', 'MDM2_Breaker', 'processed', 'graphdta_benchmark_results.csv'), index=False)
 
 # DeepPurpose prints MSE/Pearson automatically, but let's be sure
 print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")

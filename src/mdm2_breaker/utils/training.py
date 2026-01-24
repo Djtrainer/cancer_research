@@ -107,22 +107,25 @@ class SarcomaScoutSystem(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, 
-                mode="min", 
-                factor=0.5,     # Cut LR by 50%
-                patience=5,     # Wait 5 epochs (instead of 3) to be sure it's a plateau
-                min_lr=1e-5     # Safety floor
-            )
+        optimizer = torch.optim.Adam(
+            self.parameters(), 
+            lr=self.lr,
+            # weight_decay=1e-4
+        )
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        #             optimizer,
+        #             max_lr=1e-3,            # Peak LR (Match DeepPurpose's 0.001)
+        #             total_steps=self.trainer.estimated_stepping_batches,
+        #             pct_start=0.3,          # Spend 30% of time warming up
+        #             div_factor=50,          # Start at max_lr / 50
+        #             final_div_factor=10,  # End at max_lr / 10
+        # )
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "monitor": "val_loss",
-                "interval": "epoch",
-                "frequency": 1,
-            },
+            # "lr_scheduler": {
+            #     "scheduler": scheduler,
+            #     "interval": "step", # Update every batch, not every epoch
+            # },
         }
 
 
