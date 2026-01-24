@@ -612,7 +612,7 @@ class SmallMoleculeFeaturizer_DeepPurpose(SmallMoleculeFeaturizer_v3):
             if mol is None:
                 continue
 
-            mol = self._get_largest_frag(mol)
+            # mol = self._get_largest_frag(mol)
             # --- A. GRAPH FEATURES VIA DGL ---
             try:
                 # 1. Nodes: Use DGL Backend
