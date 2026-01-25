@@ -470,54 +470,28 @@ class GraphSiameseNetwork_v5(GraphSiameseNetwork_v4):
 
 # --- GraphDTA-style 1D CNN for Protein Sequences ---
 class ProteinSequenceEncoder(torch.nn.Module):
-    def __init__(self, vocab_size=26, embedding_dim=128, output_dim=128):
-        """
-        A GraphDTA-style 1D CNN for Protein Sequences.
-        
-        Args:
-            vocab_size: Number of unique amino acids (usually ~20-25 + padding).
-            embedding_dim: Size of the learnable character embedding.
-            output_dim: Final vector size (MUST match your Ligand Encoder output).
-        """
+    def __init__(self, vocab_size=26, out_dim=256):
         super().__init__()
-        
-        # 1. Embedding Layer (Maps 'A' to a vector)
-        self.embedding = torch.nn.Embedding(vocab_size, embedding_dim)
-        
-        # 2. CNN Layers (Finding motifs like 'L-X-X-L')
-        # GraphDTA typically uses 3 convolution blocks
-        self.conv1 = torch.nn.Conv1d(in_channels=embedding_dim, out_channels=32, kernel_size=8)
+        self.vocab_size = vocab_size
+
+        # DeepPurpose Architecture: 26 -> 32 -> 64 -> 96
+        self.conv1 = torch.nn.Conv1d(in_channels=vocab_size, out_channels=32, kernel_size=4)
         self.conv2 = torch.nn.Conv1d(in_channels=32, out_channels=64, kernel_size=8)
-        self.conv3 = torch.nn.Conv1d(in_channels=64, out_channels=output_dim, kernel_size=8)
-        
-        # 3. Global Pooling (Condense the whole sequence to one vector)
-        self.fc1 = torch.nn.Linear(output_dim, output_dim)
+        self.conv3 = torch.nn.Conv1d(in_channels=64, out_channels=96, kernel_size=12)
+
+        self.fc1 = torch.nn.Linear(96, out_dim)
 
     def forward(self, x):
-        # x shape: [batch_size, seq_len] (Indices)
-        
-        # Embed: [batch, seq_len, emb_dim] -> [batch, emb_dim, seq_len] for Conv1d
-        x = self.embedding(x).permute(0, 2, 1)
-        
-        # Block 1
-        x = self.conv1(x)
-        x = F.relu(x)
-        x = F.max_pool1d(x, kernel_size=2) # Downsample
-        
-        # Block 2
-        x = self.conv2(x)
-        x = F.relu(x)
-        x = F.max_pool1d(x, kernel_size=2)
-        
-        # Block 3
-        x = self.conv3(x)
-        x = F.relu(x)
-        # Global Max Pooling (Take the strongest signal from the whole protein)
+        # One-Hot Encode on the fly to avoid massive embeddings for single-target data
+        x = F.one_hot(x.long(), num_classes=self.vocab_size).float()
+        x = x.permute(0, 2, 1)
+
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+
         x = F.adaptive_max_pool1d(x, 1).squeeze(2)
-        
-        # Final Projection
-        x = self.fc1(x)
-        return x
+        return self.fc1(x)
 
 
 # --- GraphDTA-style Siamese Network 

@@ -166,6 +166,15 @@ class GraphDTAModel(nn.Module):
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+    # def _init_weights(self):
+    #     for m in self.modules():
+    #         if isinstance(m, nn.Linear):
+    #             # Switch to Kaiming Initialization for ReLU networks
+    #             nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='relu')
+    #             if m.bias is not None:
+    #                 nn.init.zeros_(m.bias)
+    #         elif isinstance(m, nn.Conv1d):
+    #             nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='relu')
 
     def forward(self, protein_input, molecule_data):
         """

@@ -22,3 +22,4 @@ result/*
 runs/*
 *.pth
 paper_outline.md
+notebooks/data/*

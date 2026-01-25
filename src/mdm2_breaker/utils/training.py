@@ -110,22 +110,22 @@ class SarcomaScoutSystem(pl.LightningModule):
         optimizer = torch.optim.Adam(
             self.parameters(), 
             lr=self.lr,
-            # weight_decay=1e-4
+            weight_decay=1e-4
         )
-        # scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        #             optimizer,
-        #             max_lr=1e-3,            # Peak LR (Match DeepPurpose's 0.001)
-        #             total_steps=self.trainer.estimated_stepping_batches,
-        #             pct_start=0.3,          # Spend 30% of time warming up
-        #             div_factor=50,          # Start at max_lr / 50
-        #             final_div_factor=10,  # End at max_lr / 10
-        # )
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                    optimizer,
+                    max_lr=1e-3,            # Peak LR (Match DeepPurpose's 0.001)
+                    total_steps=self.trainer.estimated_stepping_batches,
+                    pct_start=0.3,          # Spend 30% of time warming up
+                    div_factor=50,          # Start at max_lr / 50
+                    final_div_factor=10,  # End at max_lr / 10
+        )
         return {
             "optimizer": optimizer,
-            # "lr_scheduler": {
-            #     "scheduler": scheduler,
-            #     "interval": "step", # Update every batch, not every epoch
-            # },
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step", # Update every batch, not every epoch
+            },
         }
 
 
@@ -214,7 +214,11 @@ def train_model(
     train=True,
     mol_file=None,
     batch_size=64,
+    seed=42,
 ):
+    pl.seed_everything(seed, workers=True)
+    torch.manual_seed(seed)
+    
     trainer = define_trainer(epochs=epochs, lr=lr, save_name=save_name)
 
     train_loader, val_loader, test_loader = generate_loaders(
