@@ -216,8 +216,6 @@ def train_model(
     batch_size=64,
     seed=42,
 ):
-    pl.seed_everything(seed, workers=True)
-    torch.manual_seed(seed)
     
     trainer = define_trainer(epochs=epochs, lr=lr, save_name=save_name)
 

@@ -508,7 +508,7 @@ class SmallMoleculeFeaturizer_v5(SmallMoleculeFeaturizer_v3):
                 x=x,
                 edge_index=torch.tensor([row_idx, col_idx], dtype=torch.long),
                 edge_attr=torch.tensor(bond_feats, dtype=torch.float),
-                y=torch.tensor([row["pIC50"]], dtype=torch.float),
+                y=torch.tensor([row["pIC50_norm"]], dtype=torch.float),
                 # IMPORTANT: Store as [1, 2052] so it has a batch dimension
                 expert_features=torch.tensor([expert_vec], dtype=torch.float),
             )

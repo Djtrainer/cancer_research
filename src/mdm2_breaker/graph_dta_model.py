@@ -1,72 +1,229 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, GlobalAttention, global_max_pool
+from torch_geometric.nn import (
+    GATv2Conv,
+    GCNConv,
+    GINConv,
+    GINEConv,
+    GlobalAttention,
+    global_max_pool,
+    global_add_pool
+)
 
-
-class DeepPurposeGCNLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, dropout=0.0): # Added dropout arg
+class AtomEncoder(torch.nn.Module):
+    def __init__(self, embedding_dim=64):
         super().__init__()
-        self.conv = GCNConv(in_channels, out_channels)
+        # 1. Embeddings for Categorical Features
+        self.z_embed = torch.nn.Embedding(120, embedding_dim // 2)
+        self.hyb_embed = torch.nn.Embedding(6, embedding_dim // 4)
+        self.chir_embed = torch.nn.Embedding(3, embedding_dim // 4)
+
+        # 2. Linear "Lifter" for Continuous Features (6 input features)
+        self.float_lin = torch.nn.Linear(6, embedding_dim)
+
+        # Final Output Dimension = (32 + 16 + 16) + 64 = 128
+        self.out_dim = embedding_dim + embedding_dim
+
+    def forward(self, x):
+        # Slice the input tensor inside the forward pass
+        # x shape: [Num_Atoms, 9]
+        
+        # Categorical: First 3 columns (cast to int/long)
+        x_cat = x[:, :3].long()
+        z = self.z_embed(x_cat[:, 0]) 
+        h = self.hyb_embed(x_cat[:, 1]) 
+        c = self.chir_embed(x_cat[:, 2]) 
+        cats = torch.cat([z, h, c], dim=1)
+
+        # Continuous: Remaining 6 columns
+        x_scalar = x[:, 3:].float()
+        floats = self.float_lin(x_scalar)
+
+        # Fuse
+        return torch.cat([cats, floats], dim=1)
+
+
+class UniversalGraphLayer(nn.Module):
+    """
+    A universal wrapper that enforces the DeepPurpose 'Style'
+    (Conv -> BN -> ReLU -> Dropout + Residual) across different architectures.
+    """
+
+    def __init__(
+        self, 
+        in_channels, 
+        out_channels, 
+        layer_type="GCN", 
+        dropout=0.1, 
+        heads=4,
+        edge_dim=None # Passed from the model config (e.g., 4)
+    ):
+        super().__init__()
+        self.layer_type = layer_type
+        self.dropout_rate = dropout
+
+        # 1. Define the Graph Convolution
+        if layer_type == "GCN":
+            self.conv = GCNConv(in_channels, out_channels)
+
+        elif layer_type == "GAT":
+            # GATv2 is strictly better than GAT (dynamic vs static attention)
+            # We ensure the output dimension (heads * per_head_dim) equals out_channels
+            assert out_channels % heads == 0, "out_channels must be divisible by heads"
+            self.conv = GATv2Conv(
+                in_channels, out_channels // heads, heads=heads, concat=True
+            )
+
+        elif layer_type == "GIN":
+            # GIN requires an internal MLP
+            gin_mlp = nn.Sequential(
+                nn.Linear(in_channels, out_channels),
+                nn.ReLU(),
+                nn.Linear(out_channels, out_channels),
+            )
+            self.conv = GINConv(gin_mlp, train_eps=True)
+
+
+        elif layer_type == "GINE":
+            # GINE (Node + Edge features)
+            # 1. Matches your MLP structure exactly
+            gin_mlp = nn.Sequential(
+                nn.Linear(in_channels, out_channels),
+                nn.BatchNorm1d(out_channels), 
+                nn.ReLU(),
+                nn.Linear(out_channels, out_channels),
+            )
+            # 2. Uses PyG's internal edge projection via `edge_dim`
+            if edge_dim is None:
+                raise ValueError("GINE requires 'edge_dim' to be set!")
+                
+            self.conv = GINEConv(gin_mlp, train_eps=True, edge_dim=edge_dim)
+
+        else:
+            raise ValueError(f"Unknown layer type: {layer_type}")
+
+        # 2. Standardization Layers (Matches your DeepPurposeGCNLayer)
         self.bn = nn.BatchNorm1d(out_channels)
         self.res_projection = nn.Linear(in_channels, out_channels)
-        self.dropout_rate = dropout # Store it
 
-    def forward(self, x, edge_index):
-        # 1. Main Path
-        out = self.conv(x, edge_index)
+    def forward(self, x, edge_index, edge_attr=None):
+        
+        # --- Run Convolution ---
+        if self.layer_type == "GINE":
+            if edge_attr is None:
+                raise ValueError("GINE requires edge_attr input!")
+            out = self.conv(x, edge_index, edge_attr=edge_attr)
+            
+        elif self.layer_type == "GAT" and edge_attr is not None:
+            out = self.conv(x, edge_index, edge_attr=edge_attr)
+            
+        else:
+            # GCN or GIN (ignore edges)
+            out = self.conv(x, edge_index)
+    
         out = self.bn(out)
         out = F.relu(out)
-        
-        # FIX: Apply Dropout here!
         out = F.dropout(out, p=self.dropout_rate, training=self.training)
-        
-        # 2. Residual Path
+
+        # B. Residual Path (Projected)
         res = self.res_projection(x)
-        
+
         return out + res
 
 
-class DrugEncoderGCN(nn.Module):
+class ProteinEncoderUniversal(nn.Module):
     """
-    Replicates the 'model_drug' (DGL_GCN) from DeepPurpose.
-    Structure: 3 GCN Layers -> Attention+Max Pooling -> Linear Projection
+    The Graph-Based equivalent of ProteinEncoderCNN.
+    Treats the protein as a graph (Nodes=Residues, Edges=Contacts).
     """
-
-    def __init__(self, in_channels=74, hidden_dim=64, out_dim=256):
+    def __init__(self, in_channels=33, hidden_dim=64, out_dim=256, layer_type='GCN', dropout=0.1):
         super().__init__()
+        
+        # Stack 3 Graph Layers (same depth as your Drug Encoder)
+        self.layer1 = UniversalGraphLayer(in_channels, hidden_dim, layer_type, dropout)
+        self.layer2 = UniversalGraphLayer(hidden_dim, hidden_dim, layer_type, dropout)
+        self.layer3 = UniversalGraphLayer(hidden_dim, hidden_dim, layer_type, dropout)
 
-        # 3 Stacked GCN Layers
-        # Note: DeepPurpose typically does Input->64->64->64
-        self.layer1 = DeepPurposeGCNLayer(in_channels, hidden_dim)
-        self.layer2 = DeepPurposeGCNLayer(hidden_dim, hidden_dim)
-        self.layer3 = DeepPurposeGCNLayer(hidden_dim, hidden_dim)
-
-        # Attention Pooling Mechanism (WeightedSumAndMax)
-        # We need a small NN to calculate attention weights
-        self.att_gate_nn = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Sigmoid())
-        self.attention_pool = GlobalAttention(gate_nn=self.att_gate_nn)
-
-        # Final projection: (Sum_Dim + Max_Dim) -> Output
-        # Since we concat Sum + Max, input is hidden_dim * 2
+        # Pooling Strategy: Sum + Max (Matches your snippet)
+        # We don't use Attention Pooling here to keep it distinct from the Drug Encoder
+        # and because protein graphs are often larger/noisier.
         self.final_lin = nn.Linear(hidden_dim * 2, out_dim)
 
     def forward(self, data):
+        # data is a PyG Batch object for the Protein
         x, edge_index, batch = data.x.float(), data.edge_index, data.batch
 
-        # 1. GCN Layers
+        # 1. Graph Convolution
         x = self.layer1(x, edge_index)
         x = self.layer2(x, edge_index)
         x = self.layer3(x, edge_index)
 
-        # 2. Pooling (Weighted Sum + Max)
-        # GlobalAttention performs the weighted sum
-        v_sum = self.attention_pool(x, batch)
-        # global_max_pool performs the max
+        # 2. Pooling (Sum + Max)
+        v_sum = global_add_pool(x, batch)
         v_max = global_max_pool(x, batch)
 
-        # 3. Concatenate and Project
+        # 3. Project to 256
         v_cat = torch.cat([v_sum, v_max], dim=1)
+        return self.final_lin(v_cat)
+
+class DrugEncoderUniversal(nn.Module):
+    def __init__(self, 
+                 in_channels=74,     # Ignored if use_atom_embeddings=True
+                 hidden_dim=64, 
+                 out_dim=256, 
+                 layer_type='GCN', 
+                 dropout=0.1,
+                 use_atom_embeddings=False, # NEW TOGGLE
+                 atom_embedding_dim=64,      # Hyperparam for AtomEncoder
+                 edge_dim=None  # <--- NEW ARGUMENT
+                ):
+        super().__init__()
+        self.use_atom_embeddings = use_atom_embeddings
+
+        # --- 1. Handle Input Encoding ---
+        if use_atom_embeddings:
+            # Use your custom AtomEncoder
+            self.atom_encoder = AtomEncoder(embedding_dim=atom_embedding_dim)
+            # The input size for the GCN is now the AtomEncoder's output size (e.g., 128)
+            gnn_in_channels = self.atom_encoder.out_dim
+        else:
+            # Use raw features (like DeepPurpose's 74)
+            self.atom_encoder = None
+            gnn_in_channels = in_channels
+
+        # --- 2. Stack Graph Layers ---
+        self.layer1 = UniversalGraphLayer(gnn_in_channels, hidden_dim, layer_type, dropout, edge_dim=edge_dim)
+        self.layer2 = UniversalGraphLayer(hidden_dim, hidden_dim, layer_type, dropout, edge_dim=edge_dim)
+        self.layer3 = UniversalGraphLayer(hidden_dim, hidden_dim, layer_type, dropout, edge_dim=edge_dim)
+
+        # --- 3. Pooling & Projection ---
+        self.att_gate_nn = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Sigmoid())
+        self.attention_pool = GlobalAttention(gate_nn=self.att_gate_nn)
+        self.final_lin = nn.Linear(hidden_dim * 2, out_dim)
+
+    def forward(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        edge_attr = getattr(data, 'edge_attr', None)
+        
+        # A. Encode Atoms (if enabled)
+        if self.use_atom_embeddings:
+            # Pass the raw 9-column tensor; AtomEncoder handles slicing
+            x = self.atom_encoder(x)
+        else:
+            # Standard DeepPurpose path (float cast needed)
+            x = x.float()
+
+        # B. Graph Convolution
+        x = self.layer1(x, edge_index, edge_attr=edge_attr)
+        x = self.layer2(x, edge_index, edge_attr=edge_attr)
+        x = self.layer3(x, edge_index, edge_attr=edge_attr)
+
+        # C. Pooling
+        v_sum = self.attention_pool(x, batch)
+        v_max = global_max_pool(x, batch)
+        v_cat = torch.cat([v_sum, v_max], dim=1)
+        
         return self.final_lin(v_cat)
 
 
@@ -122,21 +279,44 @@ class GraphDTAModel(nn.Module):
     def __init__(
         self,
         molecule_in_channels=9,  # DEFAULT is 9 for your current data, DeepPurpose uses 74
-        protein_vocab_size=26,
         hidden_dim=256,  # Both encoders project to 256
+        layer_type="GCN",
+        use_atom_embeddings=False,
+        atom_embedding_dim=64,
+        drug_edge_dim=None,
+        protein_mode="sequence",       # 'sequence' or 'graph'
+        protein_vocab_size=26,         # For CNN (Sequence mode)
+        protein_in_channels=33,        # For GCN (Graph mode) - Default Graphein features
+        protein_layer_type="GCN",      # For GCN (Graph mode)
     ):
         super().__init__()
+        
+        self.protein_mode = protein_mode
 
         # 1. Encoders
-        self.drug_encoder = DrugEncoderGCN(
+        self.drug_encoder = DrugEncoderUniversal(
             in_channels=molecule_in_channels,
             hidden_dim=64,  # Internal GCN dim (from logs)
             out_dim=hidden_dim,
+            layer_type=layer_type,
+            use_atom_embeddings=use_atom_embeddings,
+            atom_embedding_dim=atom_embedding_dim,
+            edge_dim=drug_edge_dim
         )
 
-        self.protein_encoder = ProteinEncoderCNN(
-            vocab_size=protein_vocab_size, out_dim=hidden_dim
-        )
+        # 2. Protein Encoder (Switchable)
+        if protein_mode == "graph":
+            self.protein_encoder = ProteinEncoderUniversal(
+                in_channels=protein_in_channels,
+                hidden_dim=64,
+                out_dim=hidden_dim,
+                layer_type=protein_layer_type
+            )
+        else:
+            # Default to Sequence CNN
+            self.protein_encoder = ProteinEncoderCNN(
+                vocab_size=protein_vocab_size, out_dim=hidden_dim
+            )
 
         # 2. Predictor (MLP)
         # Input: 256 (Drug) + 256 (Protein) = 512
@@ -155,7 +335,7 @@ class GraphDTAModel(nn.Module):
         )
 
         self._init_weights()
-        
+
     def _init_weights(self):
         # Apply Xavier Uniform initialization to all Linear layers
         # This is the "Gold Standard" for these types of networks
@@ -165,7 +345,8 @@ class GraphDTAModel(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+
     # def _init_weights(self):
     #     for m in self.modules():
     #         if isinstance(m, nn.Linear):
