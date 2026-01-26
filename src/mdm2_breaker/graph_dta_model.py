@@ -8,7 +8,8 @@ from torch_geometric.nn import (
     GINEConv,
     GlobalAttention,
     global_max_pool,
-    global_add_pool
+    global_add_pool,
+    global_mean_pool
 )
 
 class AtomEncoder(torch.nn.Module):
@@ -72,7 +73,7 @@ class UniversalGraphLayer(nn.Module):
             # We ensure the output dimension (heads * per_head_dim) equals out_channels
             assert out_channels % heads == 0, "out_channels must be divisible by heads"
             self.conv = GATv2Conv(
-                in_channels, out_channels // heads, heads=heads, concat=True
+                in_channels, out_channels // heads, heads=heads, concat=True, edge_dim=edge_dim
             )
 
         elif layer_type == "GIN":
@@ -160,12 +161,14 @@ class ProteinEncoderUniversal(nn.Module):
         x = self.layer3(x, edge_index)
 
         # 2. Pooling (Sum + Max)
-        v_sum = global_add_pool(x, batch)
+        # v_sum = global_add_pool(x, batch)
+        v_mean = global_mean_pool(x, batch)
         v_max = global_max_pool(x, batch)
 
         # 3. Project to 256
-        v_cat = torch.cat([v_sum, v_max], dim=1)
+        v_cat = torch.cat([v_mean, v_max], dim=1)
         return self.final_lin(v_cat)
+
 
 class DrugEncoderUniversal(nn.Module):
     def __init__(self, 
